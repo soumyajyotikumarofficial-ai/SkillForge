@@ -1,0 +1,10 @@
+**/bin/
+**/obj/
+**/node_modules/
+*.log
+*.user
+*.vs/
+/.vscode/
+/.idea/
+package-lock.json
+frontend/frontend-app/node_modules/
