@@ -1,3 +1,49 @@
+<div class="card">
+  <div class="header">
+    <div class="logo">SF</div>
+    <div>
+      <h1>SkillForge — Resume Analyzer</h1>
+      <div class="muted">Upload a CV (PDF, DOCX, TXT) and get an instant score</div>
+    </div>
+  </div>
+
+  <div class="upload-row">
+    <input type="file" (change)="onFileChange($event)" accept=".pdf,.docx,.doc,.txt" />
+    <button class="btn" (click)="upload()">Analyze</button>
+    <div class="muted">{{status}}</div>
+  </div>
+
+  <div *ngIf="analysis" class="analysis">
+    <div class="grid-two">
+      <div class="panel info-panel">
+        <div class="info-row"><strong>Name:</strong> {{analysis.parsed?.name || '—'}}</div>
+        <div class="info-row"><strong>Phone:</strong> {{analysis.parsed?.phone || '—'}}</div>
+        <div class="info-row"><strong>Email:</strong> {{analysis.parsed?.email || '—'}}</div>
+        <div class="info-row"><strong>Location:</strong> {{analysis.parsed?.location || analysis.parsed?.address || '—'}}</div>
+        <div class="info-row"><strong>YOE:</strong> {{analysis.parsed?.yoe || '—'}}</div>
+        <div class="info-row"><strong>Qualification:</strong> {{analysis.parsed?.highestQualification || '—'}}</div>
+      </div>
+
+      <div class="panel skills-panel">
+        <div class="muted">Detected skills</div>
+        <div class="skills" style="margin-top:8px">
+          <div *ngFor="let s of analysis.skills" class="skill">{{s}}</div>
+          <div *ngIf="(!analysis.skills || analysis.skills.length===0)" class="muted">No skills detected</div>
+        </div>
+
+        <div style="margin-top:12px">
+          <div class="muted">Summary</div>
+          <div class="summary-text">{{analysis.summary}}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="final-score">
+      <div class="muted">Final Match Score</div>
+      <div class="big-score">{{analysis.score}}%</div>
+    </div>
+  </div>
+</div>
 <div class="container">
   <header>
     <h1>SkillForge — Upload Resume</h1>

@@ -85,9 +85,11 @@ public class AIService
                         if (lower.Contains(k)) skills.Add(k);
                     }
 
-                    var score = CalculateScore(skills, text);
+                    var score = CalculateScore(skills, text, keywords.Length);
 
-                    return new { summary, skills, score, raw = respText };
+                    var parsed = ParseResumeFields(text);
+
+                    return new { summary, skills, score, parsed, raw = respText };
                 }
                 else
                 {
@@ -132,8 +134,9 @@ public class AIService
         }
 
         var summaryFallback = text.Length > 200 ? text.Substring(0, 200) + "..." : text;
-        var scoreFallback = CalculateScore(skillsFallback, text);
-        return new { summary = summaryFallback, skills = skillsFallback, score = scoreFallback };
+        var scoreFallback = CalculateScore(skillsFallback, text, keywords.Length);
+        var parsedFallback = ParseResumeFields(text);
+        return new { summary = summaryFallback, skills = skillsFallback, score = scoreFallback, parsed = parsedFallback };
     }
 
     private static string ExtractTextFromDocx(string path)
@@ -160,12 +163,118 @@ public class AIService
         return sb.ToString();
     }
 
-    private int CalculateScore(List<string> skills, string text)
+    private static object ParseResumeFields(string text)
     {
-        var baseScore = skills.Count * 15; // each matched skill adds weight
-        var lengthFactor = Math.Min(20, text.Length / 100); // give some points for longer resumes
-        var score = baseScore + lengthFactor;
+        if (string.IsNullOrWhiteSpace(text)) return new { name = "", email = "", phone = "", address = "", highestQualification = "", yoe = "", location = "" };
+
+        var lines = text.Split(new[] { '\r', '\n' }, System.StringSplitOptions.RemoveEmptyEntries);
+
+        // Name heuristic: first line with two capitalized words
+        string name = "";
+        foreach (var l in lines)
+        {
+            var t = l.Trim();
+            if (t.Length > 2 && t.Split(' ').Length <= 4)
+            {
+                var words = t.Split(' ');
+                var caps = 0;
+                foreach (var w in words)
+                {
+                    if (w.Length > 0 && char.IsUpper(w[0])) caps++;
+                }
+                if (caps >= Math.Min(2, words.Length)) { name = t; break; }
+            }
+        }
+
+        // Email
+        var email = "";
+        try
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(text, "[\\w\\.-]+@[\\w\\.-]+\\.[A-Za-z]{2,}", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (m.Success) email = m.Value;
+        }
+        catch { }
+
+        // Phone
+        var phone = "";
+        try
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(text, "(\\+?\\d[\\d \\-.()]{6,}\\d)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (m.Success) phone = m.Value.Trim();
+        }
+        catch { }
+
+        // Highest qualification heuristic
+        var highestQualification = "";
+        try
+        {
+            var quals = new[] { "phd", "doctor", "mba", "m.sc", "msc", "m.tech", "master", "b.tech", "bsc", "b.sc", "bachelor", "btech", "degree" };
+            var low = text.ToLowerInvariant();
+            foreach (var q in quals)
+            {
+                if (low.Contains(q)) { highestQualification = q; break; }
+            }
+        }
+        catch { }
+
+        // Years of experience
+        string yoe = "";
+        try
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(text, "(\\d+(?:\\.\\d+)?)\\s+(?:years|yrs)\\s+of\\s+experience|(\\d+(?:\\.\\d+)?)\\s+years|experience\\s*[:\\-]\\s*(\\d+(?:\\.\\d+)?)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (m.Success)
+            {
+                for (int i = 1; i < m.Groups.Count; i++)
+                {
+                    if (m.Groups[i].Success) { yoe = m.Groups[i].Value; break; }
+                }
+            }
+        }
+        catch { }
+
+        // Location/address: take a line that contains words like City, Street, or known separators
+        string address = "";
+        string location = "";
+        try
+        {
+            foreach (var l in lines)
+            {
+                var t = l.Trim();
+                if (t.Length < 6) continue;
+                if (t.Any(char.IsDigit) && (t.ToLowerInvariant().Contains("street") || t.ToLowerInvariant().Contains("st") || t.ToLowerInvariant().Contains("road") || t.ToLowerInvariant().Contains("lane") || t.ToLowerInvariant().Contains("ave") || t.ToLowerInvariant().Contains(",")))
+                {
+                    address = t; break;
+                }
+            }
+            // fallback: try to find a city-like word (capitalized, known token)
+            if (string.IsNullOrEmpty(address))
+            {
+                foreach (var l in lines)
+                {
+                    var t = l.Trim();
+                    if (t.ToLowerInvariant().Contains("hyderabad") || t.ToLowerInvariant().Contains("bangalore") || t.ToLowerInvariant().Contains("mumbai") || t.ToLowerInvariant().Contains("delhi") || t.ToLowerInvariant().Contains("chennai"))
+                    { location = t; break; }
+                }
+            }
+        }
+        catch { }
+
+        return new { name = name, email = email, phone = phone, address = address, highestQualification = highestQualification, yoe = yoe, location = location };
+    }
+
+    private int CalculateScore(List<string> skills, string text, int totalKeywordCount)
+    {
+        if (totalKeywordCount <= 0) totalKeywordCount = 10;
+        // Skill match proportion (weighted up to 70 points)
+        var skillRatio = skills.Count / (double)totalKeywordCount;
+        var skillPoints = (int)System.Math.Round(skillRatio * 70);
+
+        // Length gives up to 30 points (longer resumes can indicate more experience)
+        var lengthPoints = System.Math.Min(30, text.Length / 200);
+
+        var score = skillPoints + lengthPoints;
         if (score > 100) score = 100;
+        if (score < 0) score = 0;
         return score;
     }
 }

@@ -9,16 +9,18 @@ import { HttpClient, HttpEventType } from '@angular/common/http';
 export class AppComponent {
   file: File | null = null;
   status = 'Not started';
-  result: any = null;
+  analysis: any = null;
 
   constructor(private http: HttpClient) {}
 
   onFileChange(ev: any) {
     this.file = ev.target.files[0] || null;
+    this.status = this.file ? this.file.name : 'Not started';
+    this.analysis = null;
   }
 
   upload() {
-    if (!this.file) return;
+    if (!this.file) { this.status = 'Please select a file'; return; }
     this.status = 'Uploading...';
     const fd = new FormData();
     fd.append('file', this.file, this.file.name);
@@ -28,7 +30,7 @@ export class AppComponent {
           const pct = Math.round(100 * (evt.loaded || 0) / (evt.total || 1));
           this.status = `Uploading ${pct}%`;
         } else if (evt.type === HttpEventType.Response) {
-          this.result = evt.body;
+          this.analysis = (evt as any).body;
           this.status = 'Upload complete — analysis below';
         }
       }, err => {
