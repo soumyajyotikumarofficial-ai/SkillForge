@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using System.IO;
 using System.Threading.Tasks;
 using SkillForge.API.Services;
+using SkillForge.DTOs;
 
 namespace SkillForge.API.Controllers;
 
@@ -32,7 +33,7 @@ public class CandidateController : ControllerBase
             await file.CopyToAsync(fs);
         }
 
-        var analysis = await _ai.AnalyzeResumeAsync(savePath);
-        return Ok(new { file = fileName, analysis });
+        var result = await _ai.AnalyzeResumeAsync(savePath);
+        return Ok(result);
     }
 }

@@ -2,11 +2,12 @@ using System.IO;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Net.Http;
-using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text;
+using System.Text.Json.Serialization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using SkillForge.DTOs;
 
 namespace SkillForge.API.Services;
 
@@ -16,6 +17,13 @@ public class AIService
     private readonly IConfiguration _config;
     private readonly ILogger<AIService> _logger;
 
+    private static readonly JsonSerializerOptions _serializerOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+    };
+
     public AIService(IHttpClientFactory httpFactory, IConfiguration config, ILogger<AIService> logger)
     {
         _httpFactory = httpFactory;
@@ -23,120 +31,229 @@ public class AIService
         _logger = logger;
     }
 
-    // Analyze resume: try Gemini if configured, otherwise fallback to local extraction
-    public async Task<object> AnalyzeResumeAsync(string filePath)
+    public async Task<ResumeResult> AnalyzeResumeAsync(string filePath)
     {
-        if (!File.Exists(filePath)) return new { error = "file not found" };
+        if (!File.Exists(filePath)) return new ResumeResult { ScoreLabel = "File missing" };
 
         var ext = Path.GetExtension(filePath).ToLowerInvariant();
-        string text = string.Empty;
-        if (ext == ".txt")
+        string text = ext switch
         {
-            text = await File.ReadAllTextAsync(filePath);
-        }
-        else
+            ".txt" => await File.ReadAllTextAsync(filePath),
+            ".docx" => ExtractTextFromDocx(filePath),
+            ".pdf" => ExtractTextFromPdf(filePath),
+            _ => string.Empty
+        };
+
+        if (string.IsNullOrWhiteSpace(text))
         {
-            text = "(binary or unsupported format)";
+            return new ResumeResult
+            {
+                Candidate = new ResumeCandidate(),
+                Skills = new List<string>(),
+                Score = 0,
+                ScoreLabel = "No text extracted",
+                Summary = "Unable to read the resume content."
+            };
         }
 
-        // Local keyword list used as fallback and for scoring
-        var keywords = new[] { "c#", "dotnet", "asp.net", "sql", "javascript", "typescript", "react", "angular", "python", "java" };
+        var result = await TryAnalyzeWithGeminiAsync(text);
+        if (result != null)
+        {
+            result.ScoreLabel = GetScoreLabel(result.Score);
+            return result;
+        }
 
-        // Attempt to call Gemini (if configured)
+        return BuildFallbackResult(text);
+    }
+
+    private async Task<ResumeResult?> TryAnalyzeWithGeminiAsync(string text)
+    {
+        var apiKey = _config["Gemini:ApiKey"];
+        if (string.IsNullOrWhiteSpace(apiKey)) return null;
+
+        var model = _config["Gemini:ChatModel"] ?? "gemini-1.5-flash";
+        var url = $"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={apiKey}";
+
+        var prompt = BuildPrompt(text);
+        var body = new
+        {
+            contents = new[]
+            {
+                new { role = "user", parts = new[] { new { text = prompt } } }
+            },
+            generationConfig = new { temperature = 0.1, maxOutputTokens = 1024 }
+        };
+
         try
         {
-            var apiKey = _config["Gemini:ApiKey"];
-            var endpoint = _config["Gemini:Endpoint"];
-            if (!string.IsNullOrEmpty(apiKey) && !string.IsNullOrEmpty(endpoint))
-            {
-                var client = _httpFactory.CreateClient();
-                // Google Generative Language: pass API key as query param
-                var sep = endpoint.Contains('?') ? '&' : '?';
-                var url = endpoint + sep + "key=" + Uri.EscapeDataString(apiKey);
+            var client = _httpFactory.CreateClient();
+            var payload = JsonSerializer.Serialize(body, _serializerOptions);
+            var response = await client.PostAsync(url, new StringContent(payload, Encoding.UTF8, "application/json"));
+            var raw = await response.Content.ReadAsStringAsync();
 
-                var payload = new { prompt = new { text = text } };
-                var json = JsonSerializer.Serialize(payload);
-                var resp = await client.PostAsync(url, new StringContent(json, Encoding.UTF8, "application/json"));
-                var respText = await resp.Content.ReadAsStringAsync();
-                if (resp.IsSuccessStatusCode)
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Gemini call failed: {Status} {Body}", response.StatusCode, raw);
+                return null;
+            }
+
+            using var doc = JsonDocument.Parse(raw);
+            var geminiText = doc.RootElement
+                .GetProperty("candidates")[0]
+                .GetProperty("content")
+                .GetProperty("parts")[0]
+                .GetProperty("text")
+                .GetString() ?? string.Empty;
+
+            geminiText = StripMarkdownFence(geminiText);
+            if (string.IsNullOrWhiteSpace(geminiText))
+            {
+                _logger.LogWarning("Gemini returned empty parsed text");
+                return null;
+            }
+
+            var result = JsonSerializer.Deserialize<ResumeResult>(geminiText, _serializerOptions);
+            if (result == null)
+            {
+                _logger.LogWarning("Gemini response could not be deserialized: {Raw}", geminiText);
+                return null;
+            }
+
+            result.Skills ??= new List<string>();
+            result.Candidate ??= new ResumeCandidate();
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to parse Gemini response");
+            return null;
+        }
+    }
+
+    private static ResumeResult BuildFallbackResult(string text)
+    {
+        var candidate = ParseResumeFields(text);
+        var keywords = new[] { "c#", "dotnet", "asp.net", "sql", "javascript", "typescript", "react", "angular", "python", "java" };
+        var lower = text.ToLowerInvariant();
+        var skills = new List<string>();
+        foreach (var keyword in keywords)
+        {
+            if (lower.Contains(keyword)) skills.Add(keyword);
+        }
+
+        var score = CalculateScore(skills, text, keywords.Length);
+        return new ResumeResult
+        {
+            Candidate = candidate,
+            Skills = skills,
+            Score = score,
+            ScoreLabel = GetScoreLabel(score),
+            Summary = text.Length > 240 ? text[..240].Trim() + "..." : text.Trim()
+        };
+    }
+
+    private static string BuildPrompt(string resumeText)
+    {
+        return "You are a resume parser. Extract information from the resume below and return ONLY a JSON object.\n"
+             + "No markdown, no explanation, no preamble. Return ONLY the JSON.\n\n"
+             + "Return this exact structure:\n"
+             + "{\n"
+             + "  \"candidate\": {\n"
+             + "    \"name\": \"full name or empty string\",\n"
+             + "    \"email\": \"email or empty string\",\n"
+             + "    \"phone\": \"phone or empty string\",\n"
+             + "    \"highestQualification\": \"e.g. B.Tech, MBA, MSc or empty string\",\n"
+             + "    \"yearsOfExperience\": \"e.g. 3.5 or 0 if fresher\",\n"
+             + "    \"location\": \"city or empty string\"\n"
+             + "  },\n"
+             + "  \"skills\": [\"skill1\", \"skill2\", \"skill3\"],\n"
+             + "  \"score\": 0,\n"
+             + "  \"summary\": \"2-3 sentence professional summary of this candidate\"\n"
+             + "}\n\n"
+             + "Rules for score:\n"
+             + "- 85-100: senior with strong skills and clear experience\n"
+             + "- 70-84: mid-level with good skills\n"
+             + "- 55-69: junior or fresher with decent skills\n"
+             + "- 40-54: limited skills or unclear resume\n"
+             + "- below 40: very weak resume\n\n"
+             + "RESUME TEXT:\n"
+             + resumeText;
+    }
+
+    private static string StripMarkdownFence(string text)
+    {
+        text = text.Trim();
+        if (text.StartsWith("```")) text = text[(text.IndexOf('\n') + 1)..];
+        if (text.EndsWith("```")) text = text[..text.LastIndexOf("```")];
+        return text.Trim();
+    }
+
+    private static ResumeCandidate ParseResumeFields(string text)
+    {
+        var lines = text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+        var candidate = new ResumeCandidate();
+
+        foreach (var line in lines)
+        {
+            var trimmed = line.Trim();
+            if (string.IsNullOrWhiteSpace(candidate.Name) && trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length <= 4)
+            {
+                var words = trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                var capitalized = 0;
+                foreach (var word in words)
                 {
-                    // Best-effort parse: if response has a simple text field, try to extract it
-                    string summary = respText;
-                    try
+                    if (word.Length > 0 && char.IsUpper(word[0])) capitalized++;
+                }
+                if (capitalized >= Math.Min(2, words.Length)) candidate.Name = trimmed;
+            }
+
+            if (string.IsNullOrEmpty(candidate.Email))
+            {
+                var emailMatch = System.Text.RegularExpressions.Regex.Match(trimmed, "[\\w\\.-]+@[\\w\\.-]+\\.[A-Za-z]{2,}", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                if (emailMatch.Success) candidate.Email = emailMatch.Value;
+            }
+
+            if (string.IsNullOrEmpty(candidate.Phone))
+            {
+                var phoneMatch = System.Text.RegularExpressions.Regex.Match(trimmed, "(\\+?\\d[\\d \\-.()]{6,}\\d)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                if (phoneMatch.Success) candidate.Phone = phoneMatch.Value.Trim();
+            }
+
+            if (string.IsNullOrEmpty(candidate.Location) && trimmed.Length >= 5)
+            {
+                if (trimmed.Contains(",") || trimmed.ToLowerInvariant().Contains("city") || trimmed.ToLowerInvariant().Contains("street") || trimmed.ToLowerInvariant().Contains("road"))
+                {
+                    candidate.Location = trimmed;
+                }
+            }
+
+            if (string.IsNullOrEmpty(candidate.HighestQualification))
+            {
+                var lowLine = trimmed.ToLowerInvariant();
+                if (lowLine.Contains("phd") || lowLine.Contains("doctor") || lowLine.Contains("mba") || lowLine.Contains("m.sc") || lowLine.Contains("msc") || lowLine.Contains("m.tech") || lowLine.Contains("master") || lowLine.Contains("b.tech") || lowLine.Contains("bsc") || lowLine.Contains("b.sc") || lowLine.Contains("bachelor"))
+                {
+                    candidate.HighestQualification = trimmed;
+                }
+            }
+
+            if (string.IsNullOrEmpty(candidate.YearsOfExperience))
+            {
+                var expMatch = System.Text.RegularExpressions.Regex.Match(trimmed, "(\\d+(?:\\.\\d+)?)\\s+(?:years|yrs)\\s+of\\s+experience|(\\d+(?:\\.\\d+)?)\\s+years|experience\\s*[:\\-]\\s*(\\d+(?:\\.\\d+)?)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                if (expMatch.Success)
+                {
+                    for (int i = 1; i < expMatch.Groups.Count; i++)
                     {
-                        using var doc = JsonDocument.Parse(respText);
-                        // look for common fields
-                        if (doc.RootElement.TryGetProperty("output", out var outElem)) summary = outElem.ToString();
-                        else if (doc.RootElement.TryGetProperty("candidates", out var cand) && cand.GetArrayLength() > 0)
+                        if (expMatch.Groups[i].Success)
                         {
-                            summary = cand[0].ToString();
-                        }
-                        else if (doc.RootElement.TryGetProperty("choices", out var choices) && choices.GetArrayLength() > 0)
-                        {
-                            if (choices[0].TryGetProperty("text", out var txt)) summary = txt.GetString() ?? summary;
+                            candidate.YearsOfExperience = expMatch.Groups[i].Value;
+                            break;
                         }
                     }
-                    catch { /* ignore parse errors, keep raw text */ }
-
-                    var lower = text.ToLowerInvariant();
-                    var skills = new List<string>();
-                    foreach (var k in keywords)
-                    {
-                        if (lower.Contains(k)) skills.Add(k);
-                    }
-
-                    var score = CalculateScore(skills, text, keywords.Length);
-
-                    var parsed = ParseResumeFields(text);
-
-                    return new { summary, skills, score, parsed, raw = respText };
-                }
-                else
-                {
-                    _logger.LogWarning("Gemini call failed: {Status} {Body}", resp.StatusCode, respText);
                 }
             }
         }
-        catch (System.Exception ex)
-        {
-            _logger.LogWarning(ex, "Gemini call error");
-        }
 
-        // Fallback local analysis, but try to extract text from common formats (docx, pdf)
-        if (ext == ".docx")
-        {
-            try
-            {
-                text = ExtractTextFromDocx(filePath);
-            }
-            catch (System.Exception ex)
-            {
-                _logger.LogWarning(ex, "Docx extraction failed");
-            }
-        }
-        else if (ext == ".pdf")
-        {
-            try
-            {
-                text = ExtractTextFromPdf(filePath);
-            }
-            catch (System.Exception ex)
-            {
-                _logger.LogWarning(ex, "PDF extraction failed");
-            }
-        }
-
-        var lowerFallback = text.ToLowerInvariant();
-        var skillsFallback = new List<string>();
-        foreach (var k in keywords)
-        {
-            if (lowerFallback.Contains(k)) skillsFallback.Add(k);
-        }
-
-        var summaryFallback = text.Length > 200 ? text.Substring(0, 200) + "..." : text;
-        var scoreFallback = CalculateScore(skillsFallback, text, keywords.Length);
-        var parsedFallback = ParseResumeFields(text);
-        return new { summary = summaryFallback, skills = skillsFallback, score = scoreFallback, parsed = parsedFallback };
+        return candidate;
     }
 
     private static string ExtractTextFromDocx(string path)
@@ -147,7 +264,6 @@ public class AIService
         using var s = entry.Open();
         using var sr = new StreamReader(s);
         var xml = sr.ReadToEnd();
-        // crude strip of tags
         var text = System.Text.RegularExpressions.Regex.Replace(xml, "<[^>]+>", " ");
         return System.Text.RegularExpressions.Regex.Replace(text, "\\s+", " ").Trim();
     }
@@ -156,125 +272,26 @@ public class AIService
     {
         using var doc = UglyToad.PdfPig.PdfDocument.Open(path);
         var sb = new StringBuilder();
-        foreach (var page in doc.GetPages())
-        {
-            sb.AppendLine(page.Text);
-        }
+        foreach (var page in doc.GetPages()) sb.AppendLine(page.Text);
         return sb.ToString();
     }
 
-    private static object ParseResumeFields(string text)
-    {
-        if (string.IsNullOrWhiteSpace(text)) return new { name = "", email = "", phone = "", address = "", highestQualification = "", yoe = "", location = "" };
-
-        var lines = text.Split(new[] { '\r', '\n' }, System.StringSplitOptions.RemoveEmptyEntries);
-
-        // Name heuristic: first line with two capitalized words
-        string name = "";
-        foreach (var l in lines)
-        {
-            var t = l.Trim();
-            if (t.Length > 2 && t.Split(' ').Length <= 4)
-            {
-                var words = t.Split(' ');
-                var caps = 0;
-                foreach (var w in words)
-                {
-                    if (w.Length > 0 && char.IsUpper(w[0])) caps++;
-                }
-                if (caps >= Math.Min(2, words.Length)) { name = t; break; }
-            }
-        }
-
-        // Email
-        var email = "";
-        try
-        {
-            var m = System.Text.RegularExpressions.Regex.Match(text, "[\\w\\.-]+@[\\w\\.-]+\\.[A-Za-z]{2,}", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            if (m.Success) email = m.Value;
-        }
-        catch { }
-
-        // Phone
-        var phone = "";
-        try
-        {
-            var m = System.Text.RegularExpressions.Regex.Match(text, "(\\+?\\d[\\d \\-.()]{6,}\\d)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            if (m.Success) phone = m.Value.Trim();
-        }
-        catch { }
-
-        // Highest qualification heuristic
-        var highestQualification = "";
-        try
-        {
-            var quals = new[] { "phd", "doctor", "mba", "m.sc", "msc", "m.tech", "master", "b.tech", "bsc", "b.sc", "bachelor", "btech", "degree" };
-            var low = text.ToLowerInvariant();
-            foreach (var q in quals)
-            {
-                if (low.Contains(q)) { highestQualification = q; break; }
-            }
-        }
-        catch { }
-
-        // Years of experience
-        string yoe = "";
-        try
-        {
-            var m = System.Text.RegularExpressions.Regex.Match(text, "(\\d+(?:\\.\\d+)?)\\s+(?:years|yrs)\\s+of\\s+experience|(\\d+(?:\\.\\d+)?)\\s+years|experience\\s*[:\\-]\\s*(\\d+(?:\\.\\d+)?)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            if (m.Success)
-            {
-                for (int i = 1; i < m.Groups.Count; i++)
-                {
-                    if (m.Groups[i].Success) { yoe = m.Groups[i].Value; break; }
-                }
-            }
-        }
-        catch { }
-
-        // Location/address: take a line that contains words like City, Street, or known separators
-        string address = "";
-        string location = "";
-        try
-        {
-            foreach (var l in lines)
-            {
-                var t = l.Trim();
-                if (t.Length < 6) continue;
-                if (t.Any(char.IsDigit) && (t.ToLowerInvariant().Contains("street") || t.ToLowerInvariant().Contains("st") || t.ToLowerInvariant().Contains("road") || t.ToLowerInvariant().Contains("lane") || t.ToLowerInvariant().Contains("ave") || t.ToLowerInvariant().Contains(",")))
-                {
-                    address = t; break;
-                }
-            }
-            // fallback: try to find a city-like word (capitalized, known token)
-            if (string.IsNullOrEmpty(address))
-            {
-                foreach (var l in lines)
-                {
-                    var t = l.Trim();
-                    if (t.ToLowerInvariant().Contains("hyderabad") || t.ToLowerInvariant().Contains("bangalore") || t.ToLowerInvariant().Contains("mumbai") || t.ToLowerInvariant().Contains("delhi") || t.ToLowerInvariant().Contains("chennai"))
-                    { location = t; break; }
-                }
-            }
-        }
-        catch { }
-
-        return new { name = name, email = email, phone = phone, address = address, highestQualification = highestQualification, yoe = yoe, location = location };
-    }
-
-    private int CalculateScore(List<string> skills, string text, int totalKeywordCount)
+    private static int CalculateScore(List<string> skills, string text, int totalKeywordCount)
     {
         if (totalKeywordCount <= 0) totalKeywordCount = 10;
-        // Skill match proportion (weighted up to 70 points)
         var skillRatio = skills.Count / (double)totalKeywordCount;
-        var skillPoints = (int)System.Math.Round(skillRatio * 70);
-
-        // Length gives up to 30 points (longer resumes can indicate more experience)
-        var lengthPoints = System.Math.Min(30, text.Length / 200);
-
+        var skillPoints = (int)Math.Round(skillRatio * 70);
+        var lengthPoints = Math.Min(30, text.Length / 200);
         var score = skillPoints + lengthPoints;
-        if (score > 100) score = 100;
-        if (score < 0) score = 0;
-        return score;
+        return Math.Clamp(score, 0, 100);
     }
+
+    private static string GetScoreLabel(int score) => score switch
+    {
+        >= 85 => "Excellent",
+        >= 70 => "Strong",
+        >= 55 => "Good",
+        >= 40 => "Fair",
+        _ => "Needs Work"
+    };
 }

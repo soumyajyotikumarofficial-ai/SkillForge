@@ -1,0 +1,39 @@
+﻿# Root gitignore for SkillForge
+
+# .NET build outputs
+**/bin/
+**/obj/
+*.pdb
+*.dll
+*.exe
+*.cache
+
+# Visual Studio / Rider
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Node / Vite
+node_modules/
+dist/
+build/
+.vite/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Angular generated files
+frontend/angular-app/.angular/
+frontend/frontend-app/dist/
+
+# Local uploads / environment
+backend/Uploads/Resumes/
+*.env
+
+# IDE
+.vscode/
+.idea/
