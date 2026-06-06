@@ -26,3 +26,4 @@ C:\Users\soumy\SkillForge\skillforge_phase1\backend\obj\Debug\net10.0\refint\Ski
 C:\Users\soumy\SkillForge\skillforge_phase1\backend\obj\Debug\net10.0\SkillForge.API.pdb
 C:\Users\soumy\SkillForge\skillforge_phase1\backend\obj\Debug\net10.0\SkillForge.API.genruntimeconfig.cache
 C:\Users\soumy\SkillForge\skillforge_phase1\backend\obj\Debug\net10.0\ref\SkillForge.API.dll
+C:\Users\soumy\SkillForge\skillforge_phase1\backend\bin\Debug\net10.0\package-lock.json

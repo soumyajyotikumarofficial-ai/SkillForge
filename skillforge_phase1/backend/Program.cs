@@ -7,6 +7,7 @@ builder.Services.AddCors(options =>
 {
 	options.AddDefaultPolicy(policy => policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader());
 });
+builder.Services.AddSingleton<SkillForge.API.Services.AIService>();
 
 var app = builder.Build();
 app.UseCors();

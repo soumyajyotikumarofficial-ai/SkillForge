@@ -6,7 +6,15 @@
     <title>SkillForge Frontend (placeholder)</title>
   </head>
   <body>
-    <div id="app">Loading...</div>
+    <div id="app">
+      <h1>SkillForge — Upload Resume</h1>
+      <form id="uploadForm">
+        <input type="file" id="fileInput" name="file" />
+        <button type="submit">Upload and Analyze</button>
+      </form>
+      <div id="status">Not started</div>
+      <pre id="result"></pre>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
