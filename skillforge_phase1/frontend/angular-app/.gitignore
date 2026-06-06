@@ -1,0 +1,9 @@
+node_modules/
+dist/
+build/
+/bin/
+/obj/
+*.log
+/.idea/
+.env
+package-lock.json

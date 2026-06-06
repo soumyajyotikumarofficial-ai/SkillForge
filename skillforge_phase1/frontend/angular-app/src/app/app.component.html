@@ -1,0 +1,21 @@
+<div class="container">
+  <header>
+    <h1>SkillForge — Upload Resume</h1>
+  </header>
+
+  <main>
+    <div class="card">
+      <label class="file">
+        <input type="file" (change)="onFileChange($event)" />
+      </label>
+      <button class="primary" (click)="upload()" [disabled]="!file">Upload and Analyze</button>
+      <div class="status">{{status}}</div>
+    </div>
+
+    <div *ngIf="result" class="analysis">
+      <h2>Analysis</h2>
+      <div class="score">Resume Score: {{result?.analysis?.score ?? result?.analysis?.score ?? 'N/A'}}</div>
+      <pre>{{ result?.analysis | json }}</pre>
+    </div>
+  </main>
+</div>
