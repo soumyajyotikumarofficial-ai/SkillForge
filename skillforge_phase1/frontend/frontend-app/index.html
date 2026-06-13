@@ -1,21 +1,545 @@
-<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>SkillForge Frontend (placeholder)</title>
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext x='0' y='14' font-size='14'%3ESF%3C/text%3E%3C/svg%3E">
-  </head>
-  <body>
-    <div id="app">
-      <h1>SkillForge — Upload Resume</h1>
-      <form id="uploadForm">
-        <input type="file" id="fileInput" name="file" />
-        <button type="submit">Upload and Analyze</button>
-      </form>
-      <div id="status">Not started</div>
-      <pre id="result"></pre>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SkillForge - AI Resume Analyzer</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            color: #e2e8f0;
+            min-height: 100vh;
+        }
+        
+        /* HEADER */
+        .header { 
+            background: rgba(15, 23, 42, 0.95);
+            border-bottom: 1px solid rgba(100, 116, 139, 0.3);
+            padding: 1.5rem 2rem;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            backdrop-filter: blur(10px);
+        }
+        .logo { 
+            display: flex; 
+            align-items: center; 
+            gap: 0.75rem; 
+            font-weight: 700; 
+            font-size: 1.5rem;
+        }
+        .logo-mark { 
+            width: 2.5rem; 
+            height: 2.5rem; 
+            background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+            border-radius: 0.75rem; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            color: white; 
+            font-weight: 800;
+        }
+        
+        /* UPLOAD SECTION */
+        .upload-section { 
+            padding: 4rem 2rem; 
+            max-width: 600px; 
+            margin: 0 auto;
+        }
+        .upload-container { 
+            background: linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.8) 100%);
+            border: 1px solid rgba(100, 116, 139, 0.3);
+            border-radius: 1.5rem; 
+            padding: 3rem;
+            backdrop-filter: blur(10px);
+        }
+        .upload-hero { 
+            text-align: center; 
+            margin-bottom: 2rem;
+        }
+        .upload-hero h1 { 
+            font-size: 2.5rem;
+            margin-bottom: 0.75rem; 
+            background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .upload-hero p { 
+            font-size: 1rem; 
+            color: #94a3b8;
+        }
+        
+        /* DROP ZONE */
+        .drop-zone { 
+            border: 2px dashed rgba(99, 102, 241, 0.5);
+            border-radius: 1rem; 
+            padding: 2.5rem; 
+            text-align: center; 
+            cursor: pointer;
+            transition: all 0.3s;
+            background: rgba(99, 102, 241, 0.05);
+        }
+        .drop-zone:hover { 
+            border-color: #6366f1;
+            background: rgba(99, 102, 241, 0.1);
+        }
+        .drop-icon { 
+            font-size: 3.5rem; 
+            margin-bottom: 1rem;
+        }
+        .drop-title { 
+            font-weight: 600; 
+            font-size: 1.1rem;
+            margin-bottom: 0.25rem;
+        }
+        .drop-hint { 
+            font-size: 0.875rem; 
+            color: #94a3b8;
+        }
+        
+        /* BUTTON */
+        .submit-btn { 
+            background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+            color: white; 
+            border: none; 
+            padding: 1rem 2rem; 
+            border-radius: 0.75rem; 
+            font-weight: 600; 
+            font-size: 1rem; 
+            cursor: pointer; 
+            width: 100%; 
+            margin-top: 2rem;
+            transition: all 0.3s;
+        }
+        .submit-btn:hover { 
+            transform: translateY(-2px);
+            box-shadow: 0 20px 40px rgba(99, 102, 241, 0.3);
+        }
+        .submit-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        
+        /* RESULTS */
+        .results-section { 
+            display: none;
+            max-width: 1200px; 
+            margin: 0 auto; 
+            padding: 2rem;
+        }
+        .back-btn { 
+            background: none; 
+            border: none; 
+            color: #6366f1;
+            cursor: pointer; 
+            font-weight: 500;
+            margin-bottom: 2rem;
+            padding: 0.5rem;
+        }
+        .back-btn:hover { color: #a855f7; }
+        
+        /* GRID */
+        .results-grid { 
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 2rem;
+            margin-bottom: 2rem;
+        }
+        
+        /* CARDS */
+        .card { 
+            background: rgba(30, 41, 59, 0.6);
+            border: 1px solid rgba(100, 116, 139, 0.3);
+            border-radius: 1.5rem; 
+            padding: 2rem;
+            backdrop-filter: blur(10px);
+            transition: all 0.3s;
+        }
+        .card:hover {
+            border-color: rgba(99, 102, 241, 0.5);
+            background: rgba(30, 41, 59, 0.8);
+        }
+        
+        .card-label { 
+            font-size: 0.75rem; 
+            font-weight: 600; 
+            text-transform: uppercase;
+            color: #94a3b8;
+            letter-spacing: 0.1em;
+            margin-bottom: 1rem;
+        }
+        
+        /* SCORE CARD */
+        .score-card {
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        .score-number { 
+            font-size: 4rem; 
+            background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            font-weight: 800;
+            margin: 1rem 0;
+        }
+        .score-label { 
+            display: inline-block;
+            padding: 0.5rem 1rem;
+            background: rgba(99, 102, 241, 0.2);
+            color: #a855f7;
+            border-radius: 0.5rem;
+            font-weight: 600;
+            margin-top: 1rem;
+        }
+        
+        /* CANDIDATE CARD */
+        .candidate-card { 
+            text-align: center;
+        }
+        .candidate-avatar { 
+            width: 5rem; 
+            height: 5rem; 
+            background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+            border-radius: 50%;
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            color: white; 
+            font-weight: 700; 
+            font-size: 1.75rem;
+            margin: 0 auto 1rem;
+        }
+        .candidate-name { 
+            font-size: 1.75rem; 
+            margin-bottom: 1.5rem;
+            background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .detail-row { 
+            padding: 0.75rem 0;
+            border-bottom: 1px solid rgba(100, 116, 139, 0.3);
+            display: flex; 
+            justify-content: space-between;
+            font-size: 0.9rem;
+        }
+        .detail-row:last-child { border-bottom: none; }
+        .detail-label { 
+            color: #94a3b8;
+            font-weight: 500;
+        }
+        .detail-value { 
+            color: #cbd5e1;
+            font-weight: 600;
+        }
+        
+        /* SUMMARY CARD */
+        .summary-card { 
+            grid-column: 1 / -1;
+        }
+        .summary-text { 
+            font-size: 1.1rem; 
+            line-height: 1.8;
+            color: #cbd5e1;
+            margin-bottom: 1rem;
+            font-style: italic;
+        }
+        .powered-by { 
+            font-size: 0.85rem; 
+            color: #94a3b8;
+            text-align: right;
+        }
+        
+        /* SKILLS CARD */
+        .skills-card { 
+            grid-column: 1 / -1;
+        }
+        .skills-header { 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: flex-start;
+            margin-bottom: 1.5rem;
+        }
+        .skills-count { 
+            font-size: 0.875rem; 
+            color: #94a3b8;
+            margin-top: 0.5rem;
+        }
+        .skills-badge { 
+            background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+            color: white;
+            width: 3rem; 
+            height: 3rem; 
+            border-radius: 50%; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            font-weight: 700; 
+            font-size: 1.25rem;
+        }
+        .skills-grid { 
+            display: flex; 
+            flex-wrap: wrap; 
+            gap: 0.75rem;
+        }
+        .skill-chip { 
+            background: rgba(99, 102, 241, 0.2);
+            color: #cbd5e1;
+            padding: 0.625rem 1rem; 
+            border-radius: 9999px; 
+            font-size: 0.875rem; 
+            font-weight: 500;
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            transition: all 0.3s;
+        }
+        .skill-chip:hover {
+            background: rgba(99, 102, 241, 0.3);
+            border-color: rgba(99, 102, 241, 0.6);
+        }
+        
+        /* NEXT STEPS */
+        .next-steps-card { 
+            grid-column: 1 / -1;
+        }
+        .next-steps-grid { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); 
+            gap: 1.5rem;
+            margin-top: 1.5rem;
+        }
+        .next-step-item { 
+            display: flex; 
+            gap: 1rem; 
+            padding: 1rem;
+            border-radius: 0.75rem;
+            transition: all 0.3s;
+        }
+        .next-step-item:hover { 
+            background: rgba(99, 102, 241, 0.1);
+        }
+        .next-step-icon { 
+            width: 3rem; 
+            height: 3rem; 
+            border-radius: 0.5rem;
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            font-size: 1.5rem;
+            flex-shrink: 0;
+        }
+        .next-step-title { 
+            font-weight: 600; 
+            color: #cbd5e1;
+            margin-bottom: 0.25rem;
+        }
+        .next-step-desc { 
+            font-size: 0.85rem; 
+            color: #94a3b8;
+        }
+        
+        @media (max-width: 768px) {
+            .upload-section { padding: 2rem 1rem; }
+            .upload-container { padding: 1.5rem; }
+            .results-grid { grid-template-columns: 1fr; }
+            .upload-hero h1 { font-size: 1.75rem; }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="logo">
+            <div class="logo-mark">SF</div>
+            <span>SkillForge</span>
+        </div>
+    </header>
+
+    <div id="uploadSection" class="upload-section">
+        <div class="upload-container">
+            <div class="upload-hero">
+                <h1>Analyse Your Resume</h1>
+                <p>Get AI-powered skill analysis instantly</p>
+            </div>
+            <form id="uploadForm">
+                <div class="drop-zone" id="dropZone">
+                    <div class="drop-icon">📄</div>
+                    <p class="drop-title">Drop your resume here</p>
+                    <p class="drop-hint">or click to browse — PDF, DOCX, or TXT</p>
+                    <input type="file" id="fileInput" style="display: none;" accept=".pdf,.docx,.txt" />
+                </div>
+                <button type="submit" class="submit-btn">Analyse Resume</button>
+            </form>
+        </div>
     </div>
-    <script type="module" src="/src/main.ts"></script>
-  </body>
+
+    <div id="resultsSection" class="results-section">
+        <button id="backBtn" class="back-btn">← Analyse Another Resume</button>
+        
+        <div class="results-grid">
+            <div class="card score-card">
+                <p class="card-label">Resume Score</p>
+                <div class="score-number" id="scoreNumber">0</div>
+                <div class="score-label" id="scoreLabel">—</div>
+            </div>
+
+            <div class="card candidate-card">
+                <p class="card-label">Candidate Profile</p>
+                <div class="candidate-avatar" id="candidateAvatar">?</div>
+                <h2 class="candidate-name" id="candidateName">—</h2>
+                <div id="detailsContainer"></div>
+            </div>
+
+            <div class="card summary-card">
+                <p class="card-label">AI Summary</p>
+                <p class="summary-text" id="summaryText">—</p>
+                <div><span class="powered-by">⚡ Powered by Gemini</span></div>
+            </div>
+        </div>
+
+        <div class="card skills-card">
+            <div class="skills-header">
+                <div>
+                    <p class="card-label">Detected Skills</p>
+                    <p class="skills-count" id="skillsCountText">0 skills found</p>
+                </div>
+                <div class="skills-badge" id="skillsBadge">0</div>
+            </div>
+            <div class="skills-grid" id="skillsGrid"></div>
+        </div>
+
+        <div class="card next-steps-card">
+            <p class="card-label">What's Next — Phase 2 Features Coming Soon</p>
+            <div class="next-steps-grid">
+                <div class="next-step-item">
+                    <div class="next-step-icon" style="background: rgba(99, 102, 241, 0.2);">🎯</div>
+                    <div>
+                        <p class="next-step-title">Match Against Jobs</p>
+                        <p class="next-step-desc">See how you match specific job descriptions</p>
+                    </div>
+                </div>
+                <div class="next-step-item">
+                    <div class="next-step-icon" style="background: rgba(168, 85, 247, 0.2);">📚</div>
+                    <div>
+                        <p class="next-step-title">Skill Gap Analysis</p>
+                        <p class="next-step-desc">Discover missing skills & learning paths</p>
+                    </div>
+                </div>
+                <div class="next-step-item">
+                    <div class="next-step-icon" style="background: rgba(14, 165, 233, 0.2);">🤝</div>
+                    <div>
+                        <p class="next-step-title">Team Matching</p>
+                        <p class="next-step-desc">Get ranked among other candidates</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        const API_URL = 'http://localhost:5000/api';
+        
+        // DOM Elements
+        const uploadSection = document.getElementById('uploadSection');
+        const resultsSection = document.getElementById('resultsSection');
+        const uploadForm = document.getElementById('uploadForm');
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const backBtn = document.getElementById('backBtn');
+        const scoreNumber = document.getElementById('scoreNumber');
+        const scoreLabel = document.getElementById('scoreLabel');
+        const candidateAvatar = document.getElementById('candidateAvatar');
+        const candidateName = document.getElementById('candidateName');
+        const detailsContainer = document.getElementById('detailsContainer');
+        const summaryText = document.getElementById('summaryText');
+        const skillsGrid = document.getElementById('skillsGrid');
+        const skillsCountText = document.getElementById('skillsCountText');
+        const skillsBadge = document.getElementById('skillsBadge');
+        const submitBtn = document.querySelector('.submit-btn');
+
+        // File handling
+        dropZone.addEventListener('click', () => fileInput.click());
+        dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.style.borderColor = '#6366f1'; });
+        dropZone.addEventListener('dragleave', () => { dropZone.style.borderColor = 'rgba(99, 102, 241, 0.5)'; });
+        dropZone.addEventListener('drop', (e) => { e.preventDefault(); fileInput.files = e.dataTransfer.files; });
+
+        // Form submission
+        uploadForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!fileInput.files[0]) return alert('Please select a resume');
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+
+            submitBtn.disabled = true;
+
+            try {
+                const response = await fetch(`${API_URL}/candidate/analyze-resume`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) throw new Error('API error: ' + response.statusText);
+                
+                const data = await response.json();
+                renderResults(data);
+                uploadSection.style.display = 'none';
+                resultsSection.style.display = 'block';
+            } catch (err) {
+                alert('Error: ' + err.message);
+            } finally {
+                submitBtn.disabled = false;
+            }
+        });
+
+        // Back button
+        backBtn.addEventListener('click', () => {
+            uploadSection.style.display = 'block';
+            resultsSection.style.display = 'none';
+            fileInput.value = '';
+        });
+
+        // Render results
+        function renderResults(data) {
+            const name = data.candidate?.name || 'Unknown';
+            const score = data.score || 0;
+            const skills = data.skills || [];
+
+            scoreNumber.textContent = score;
+            scoreLabel.textContent = getScoreLabel(score);
+            
+            const initials = name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+            candidateAvatar.textContent = initials;
+            candidateName.textContent = name;
+
+            detailsContainer.innerHTML = `
+                <div class="detail-row"><span class="detail-label">Email</span><span class="detail-value">${data.candidate?.email || '-'}</span></div>
+                <div class="detail-row"><span class="detail-label">Phone</span><span class="detail-value">${data.candidate?.phone || '-'}</span></div>
+                <div class="detail-row"><span class="detail-label">Location</span><span class="detail-value">${data.candidate?.location || '-'}</span></div>
+                <div class="detail-row"><span class="detail-label">Qualification</span><span class="detail-value">${data.candidate?.highestQualification || '-'}</span></div>
+                <div class="detail-row"><span class="detail-label">Experience</span><span class="detail-value">${data.candidate?.yearsOfExperience || '-'} years</span></div>
+            `;
+
+            summaryText.textContent = data.summary || '-';
+            
+            skillsCountText.textContent = `${skills.length} skill${skills.length !== 1 ? 's' : ''} found`;
+            skillsBadge.textContent = skills.length;
+            skillsGrid.innerHTML = skills.map(s => `<div class="skill-chip">${s}</div>`).join('');
+        }
+
+        function getScoreLabel(score) {
+            if (score >= 80) return 'Excellent';
+            if (score >= 60) return 'Good';
+            if (score >= 40) return 'Fair';
+            return 'Needs Improvement';
+        }
+    </script>
+</body>
 </html>
