@@ -1,0 +1,31 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          {
+            "text": "{\"candidate\": {\"name\": \"Soumyajyoti Kumar\", \"email\": \"soumyajyotikumarofficial@gmail.com\", \"phone\": \"+918335987516\", \"location\": \"Chinsurah, Hooghly\", \"highestQualification\": \"Bachelor of Technology in Electrical Engineering\", \"yearsOfExperience\": \"3.5+ years\"}, \"skills\": [\"C# (.NET 8)\", \"Python\", \"SQL (T-SQL, MSSQL Server)\", \"HTML/CSS\", \"JavaScript\", \"LLMs (Ollama/Phi-3)\", \"NLP\", \"Semantic Analysis\", \"Predictive Modeling\", \"Scikit-learn\", \"ASP.NET Core\", \"EF Core\", \"FastAPI\", \"Angular\", \"RESTful APIs\", \"Microservices\", \"Azure DevOps\", \"Docker\", \"RabbitMQ\", \"Hangfire\", \"Power BI (DAX)\", \"xUnit\", \"Moq\", \"SSMS\", \"MSSQL Performance Tuning\", \"PARTITION\", \"PIVOT\", \"Window Functions\"], \"score\": 90, \"summary\": \"Results-driven System Engineer with 3.5+ years of experience delivering enterprise transformation programs for mission-critical, high-availability systems. Possesses demonstrated expertise in .NET 8 and enterprise Java ecosystems, with a strong track record of managing distributed offshore teams. Focused on translating client needs into scalable technical solutions and leveraging AI integration with LLMs and predictive analytics.\"}"
+          }
+        ],
+        "role": "model"
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 1532,
+    "candidatesTokenCount": 310,
+    "totalTokenCount": 2938,
+    "promptTokensDetails": [
+      {
+        "modality": "TEXT",
+        "tokenCount": 1532
+      }
+    ],
+    "thoughtsTokenCount": 1096,
+    "serviceTier": "standard"
+  },
+  "modelVersion": "gemini-2.5-flash",
+  "responseId": "LKwtaoKAJvH7juMPweWDyAs"
+}

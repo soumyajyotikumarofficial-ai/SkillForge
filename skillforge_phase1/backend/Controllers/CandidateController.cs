@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using SkillForge.API.Services;
 using SkillForge.DTOs;
 using System.Text.Json;
+using System.IO;
 
 namespace SkillForge.Controllers;
 
@@ -73,7 +74,9 @@ public class CandidateController : ControllerBase
         {
             var document = UglyToad.PdfPig.PdfDocument.Open(stream);
             var text = string.Join("\n", document.GetPages().Select(p => p.Text));
-            _logger.LogInformation("PDF extracted: {Length} characters", text.Length);
+            _logger.LogInformation("PDF TEXT LENGTH: {Length}", text.Length);
+
+System.IO.File.WriteAllText("extracted-pdf.txt", text);
             return text;
         }
         catch (Exception ex)
