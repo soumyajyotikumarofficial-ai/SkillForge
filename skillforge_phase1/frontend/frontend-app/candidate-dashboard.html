@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SkillForge - Candidate Dashboard</title>
+    <style>
+        :root {
+            --primary: #4f46e5;
+            --primary-hover: #4338ca;
+            --bg-main: #f8fafc;
+            --bg-card: #ffffff;
+            --text-dark: #0f172a;
+            --text-muted: #64748b;
+            --border: #e2e8f0;
+            --success: #10b981;
+            --accent: #f1f5f9;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg-main); color: var(--text-dark); -webkit-font-smoothing: antialiased; }
+        
+        /* Navbar styling */
+        .navbar { background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); color: white; padding: 16px 40px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 20px rgba(79, 70, 229, 0.15); }
+        .navbar h1 { font-size: 24px; font-weight: 700; letter-spacing: -0.5px; }
+        .user-profile { display: flex; align-items: center; gap: 20px; }
+        .logout-btn { background: rgba(255, 255, 255, 0.15); color: white; border: 1px solid rgba(255,255,255,0.3); padding: 8px 18px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 14px; transition: all 0.2s; }
+        .logout-btn:hover { background: white; color: var(--primary); border-color: white; }
+        
+        /* Layout structures */
+        .dashboard-container { max-width: 1300px; margin: 40px auto; padding: 0 24px; }
+        .welcome-card { background: var(--bg-card); padding: 28px; border-radius: 16px; border: 1px solid var(--border); box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 32px; }
+        .welcome-card h2 { font-size: 26px; font-weight: 700; color: var(--text-dark); margin-bottom: 6px; }
+        .welcome-card p { color: var(--text-muted); font-size: 15px; }
+        
+        .content-grid { display: grid; grid-template-columns: 1.1fr 1.9fr; gap: 32px; align-items: start; }
+        .panel { background: var(--bg-card); padding: 32px; border-radius: 16px; border: 1px solid var(--border); box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
+        .panel h3 { font-size: 18px; font-weight: 700; color: var(--text-dark); margin-bottom: 20px; border-left: 4px solid var(--primary); padding-left: 10px; }
+        
+        /* Drag and Drop Zone */
+        .upload-container { border: 2px dashed #cbd5e1; padding: 50px 20px; border-radius: 12px; text-align: center; background: #fdfdfd; cursor: pointer; transition: all 0.2s ease; margin-bottom: 24px; }
+        .upload-container:hover { border-color: var(--primary); background: #f5f3ff; }
+        .upload-container input[type="file"] { display: none; }
+        .upload-icon { font-size: 44px; margin-bottom: 12px; }
+        .file-info { margin-top: 14px; font-size: 14px; color: var(--primary); font-weight: 600; }
+        
+        .action-btn { background: var(--primary); color: white; border: none; padding: 14px 28px; border-radius: 10px; font-size: 16px; font-weight: 600; cursor: pointer; width: 100%; transition: background-color 0.2s; display: flex; justify-content: center; align-items: center; gap: 10px; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.2); }
+        .action-btn:hover { background: var(--primary-hover); }
+        .action-btn:disabled { background: #cbd5e1; box-shadow: none; cursor: not-allowed; }
+        
+        /* Result Grid Sections */
+        .results-wrapper { display: flex; flex-direction: column; gap: 24px; display: none; }
+        .results-wrapper.show { display: flex; }
+        
+        /* Summary Row: Score Box + Personal Box */
+        .summary-header-row { display: grid; grid-template-columns: 150px 1fr; gap: 20px; align-items: center; }
+        
+        /* Filled Progress Score Counter Display */
+        .score-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; height: 160px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; box-shadow: 0 1px 2px rgba(0,0,0,0.02); }
+        
+        /* Conic Gradient Wrapper for Accurate Radial Filling */
+        .score-progress-ring { width: 110px; height: 110px; border-radius: 50%; background: conic-gradient(var(--success) 0%, #e2e8f0 0%); display: flex; justify-content: center; align-items: center; transition: background 0.4s ease; }
+        .score-circle-inner { width: 94px; height: 94px; border-radius: 50%; background: white; display: flex; flex-direction: column; justify-content: center; align-items: center; }
+        
+        .score-num { font-size: 32px; font-weight: 800; color: var(--text-dark); line-height: 1; }
+        .score-label { font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
+        
+        /* Personal Details Section Card */
+        .details-card { background: var(--accent); border: 1px solid var(--border); border-radius: 16px; padding: 20px 24px; height: 160px; display: flex; flex-direction: column; justify-content: center; }
+        .details-card h4 { font-size: 18px; font-weight: 700; color: var(--text-dark); margin-bottom: 8px; }
+        .details-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; font-size: 13px; }
+        .detail-item { color: var(--text-dark); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .detail-item strong { color: var(--text-muted); font-weight: 500; }
+
+        /* Modern Structured info blocks */
+        .info-section { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 24px; }
+        .section-header { font-size: 13px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+        .summary-text { font-size: 14.5px; line-height: 1.6; color: #334155; }
+        
+        /* Dynamic Badge Container */
+        .skills-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+        .skill-badge { background: #eef2ff; color: var(--primary); padding: 6px 14px; border-radius: 9999px; font-size: 13px; font-weight: 600; border: 1px solid #e0e7ff; transition: all 0.2s; }
+        .skill-badge:hover { transform: translateY(-1px); background: #e0e7ff; box-shadow: 0 2px 4px rgba(79, 70, 229, 0.1); }
+
+        .spinner { width: 20px; height: 20px; border: 3px solid rgba(255,255,255,0.3); border-radius: 50%; border-top-color: white; animation: spin 0.8s linear infinite; display: none; }
+        .spinner.show { display: inline-block; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        
+        @media(max-width: 960px) { .content-grid { grid-template-columns: 1fr; } .summary-header-row { grid-template-columns: 1fr; } .score-card, .details-card { height: auto; padding: 20px; } }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <h1>🎯 SkillForge</h1>
+        <div class="user-profile">
+            <span id="navUsername">Candidate</span>
+            <button class="logout-btn" onclick="handleLogout()">Logout</button>
+        </div>
+    </nav>
+
+    <div class="dashboard-container">
+        <div class="welcome-card">
+            <h2>Welcome back, <span id="welcomeName">User</span></h2>
+            <p>Upload your resume below to run real-time contextual validation against parsing data criteria.</p>
+        </div>
+
+        <div class="content-grid">
+            <!-- Left Panel: Upload Form Controller -->
+            <div class="panel">
+                <h3>Resume Upload</h3>
+                <div class="upload-container" onclick="document.getElementById('resumeInput').click()">
+                    <div class="upload-icon">📬</div>
+                    <p style="color: var(--text-dark); font-weight: 600; font-size: 15px;">Choose file or drag here</p>
+                    <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Supports PDF, DOCX, TXT</p>
+                    <input type="file" id="resumeInput" accept=".pdf,.docx,.txt" onchange="handleFileSelection(this)">
+                    <div id="fileInfo" class="file-info"></div>
+                </div>
+
+                <button id="analyzeBtn" class="action-btn" disabled onclick="triggerResumeAnalysis()">
+                    <div id="btnSpinner" class="spinner"></div>
+                    <span id="btnText">Analyze Profile Metrics</span>
+                </button>
+            </div>
+
+            <!-- Right Panel: Dashboard Metrics Results View Canvas -->
+            <div class="panel" style="min-height: 500px;">
+                <h3>Analysis Dashboard</h3>
+                
+                <!-- Initial Empty Standby Placeholder -->
+                <div id="placeholderView" style="text-align: center; color: var(--text-muted); padding-top: 120px;">
+                    <span style="font-size: 48px; display: block; margin-bottom: 12px;">📊</span>
+                    <p>No document data processed yet. Run analysis to display engine metrics logs.</p>
+                </div>
+
+                <!-- Structured Dynamic Response Output Canvas Container -->
+                <div id="resultsWrapper" class="results-wrapper">
+                    
+                    <!-- Top horizontal dashboard matrix block split components -->
+                    <div class="summary-header-row">
+                        <!-- Filled Progress Ring Score Card -->
+                        <div class="score-card">
+                            <div id="scoreRing" class="score-progress-ring">
+                                <div class="score-circle-inner">
+                                    <span id="scoreNumber" class="score-num">0</span>
+                                    <span class="score-label">Score</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Personal Details Identity Grid Display Card -->
+                        <div class="details-card">
+                            <h4 id="candidateName">Candidate Identity</h4>
+                            <div class="details-grid">
+                                <div class="detail-item"><strong>Email:</strong> <span id="candidateEmail">-</span></div>
+                                <div class="detail-item"><strong>Phone:</strong> <span id="candidatePhone">-</span></div>
+                                <div class="detail-item"><strong>Location:</strong> <span id="candidateLocation">-</span></div>
+                                <div class="detail-item"><strong>Education:</strong> <span id="candidateEducation">-</span></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- AI ANALYSIS SUMMARY SECTION -->
+                    <div class="info-section">
+                        <div class="section-header">🤖 AI Executive Summary</div>
+                        <p id="analysisSummary" class="summary-text">Extracting parsed context values...</p>
+                    </div>
+
+                    <!-- IDENTIFIED SKILLS TAGS BADGES CORE SECTION -->
+                    <div class="info-section">
+                        <div class="section-header">🛠️ Technical Skills Core Matrix</div>
+                        <div id="skillsContainer" class="skills-grid">
+                            <!-- Injected badges populate here dynamically -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const BACKEND_PORTS = ['5123', '5000'];
+        let selectedFile = null;
+
+        window.addEventListener('DOMContentLoaded', () => {
+            const token = localStorage.getItem('token');
+            const username = localStorage.getItem('username');
+            const role = localStorage.getItem('role');
+
+            if (!token || role !== 'candidate') {
+                localStorage.clear();
+                window.location.href = './login.html'; 
+                return;
+            }
+
+            document.getElementById('navUsername').textContent = username;
+            document.getElementById('welcomeName').textContent = username;
+        });
+
+        function handleFileSelection(input) {
+            if (input.files && input.files[0]) {
+                selectedFile = input.files[0];
+                document.getElementById('fileInfo').textContent = `Selected: ${selectedFile.name} (${(selectedFile.size/1024).toFixed(1)} KB)`;
+                document.getElementById('analyzeBtn').disabled = false;
+                
+                document.getElementById('resultsWrapper').classList.remove('show');
+                document.getElementById('placeholderView').style.display = 'block';
+            }
+        }
+
+        async function triggerResumeAnalysis() {
+            if (!selectedFile) return;
+
+            const analyzeBtn = document.getElementById('analyzeBtn');
+            const spinner = document.getElementById('btnSpinner');
+            const btnText = document.getElementById('btnText');
+            const placeholderView = document.getElementById('placeholderView');
+            const resultsWrapper = document.getElementById('resultsWrapper');
+
+            analyzeBtn.disabled = true;
+            spinner.classList.add('show');
+            btnText.textContent = 'Parsing Engine Text...';
+
+            const formData = new FormData();
+            formData.append('file', selectedFile);
+
+            let responseSuccess = false;
+            let outputText = "";
+
+            for (let i = 0; i < BACKEND_PORTS.length; i++) {
+                try {
+                    const protocol = BACKEND_PORTS[i] === '5123' ? 'https' : 'http';
+                    const targetEndpoint = `${protocol}://localhost:${BACKEND_PORTS[i]}/api/Candidate/upload-resume`;
+                    
+                    console.log(`Pinging link routing context: ${targetEndpoint}`);
+
+                    const response = await fetch(targetEndpoint, {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    if (response.ok) {
+                        outputText = await response.text();
+                        responseSuccess = true;
+                        break;
+                    }
+                } catch (err) {
+                    console.warn(`Connection dropped on local target channel port ${BACKEND_PORTS[i]}.`);
+                }
+            }
+
+            analyzeBtn.disabled = false;
+            spinner.classList.remove('show');
+            btnText.textContent = 'Analyze Profile Metrics';
+
+            if (responseSuccess) {
+                placeholderView.style.display = 'none';
+                resultsWrapper.classList.add('show');
+                renderBeautifulMetrics(outputText);
+            } else {
+                alert("Failed to establish processing context link updates. Ensure backend instances are up.");
+            }
+        }
+
+        function renderBeautifulMetrics(rawData) {
+            try {
+                const data = JSON.parse(rawData);
+                
+                // 1. DYNAMIC FILLING SCORE COMPONENT
+                const targetScore = Math.min(Math.max(parseInt(data.score) || 0, 0), 100); 
+                document.getElementById('scoreNumber').textContent = targetScore;
+                
+                // Dynamically update the CSS conic-gradient fill on the outer ring circle
+                const scoreRing = document.getElementById('scoreRing');
+                scoreRing.style.background = `conic-gradient(var(--success) 0% ${targetScore}%, #cbd5e1 ${targetScore}% 100%)`;
+
+                // 2. Parse Profile Identity Values
+                const candidate = data.candidate || {};
+                document.getElementById('candidateName').textContent = candidate.name || "Unknown Professional";
+                document.getElementById('candidateEmail').textContent = candidate.email || "N/A";
+                document.getElementById('candidatePhone').textContent = candidate.phone || "N/A";
+                document.getElementById('candidateLocation').textContent = candidate.location || "N/A";
+                document.getElementById('candidateEducation').textContent = candidate.highestQualification || "Not Specified";
+
+                // 3. Render Profile Summarization Block
+                document.getElementById('analysisSummary').textContent = data.summary || "No executive text breakdown recorded by the AI module engine.";
+
+                // 4. Generate dynamic skill profile mapping badges
+                const skillsContainer = document.getElementById('skillsContainer');
+                skillsContainer.innerHTML = ''; 
+
+                const skillList = data.skills || [];
+                if (skillList.length > 0) {
+                    skillList.forEach(skill => {
+                        const spanBadge = document.createElement('span');
+                        spanBadge.className = 'skill-badge';
+                        spanBadge.textContent = skill;
+                        skillsContainer.appendChild(spanBadge);
+                    });
+                } else {
+                    skillsContainer.innerHTML = `<span style="font-size:13px; color:var(--text-muted);">No technical skills identified.</span>`;
+                }
+
+            } catch (err) {
+                console.error("Layout rendering exception:", err);
+                document.getElementById('placeholderView').style.display = 'none';
+                document.getElementById('resultsWrapper').classList.add('show');
+                document.getElementById('analysisSummary').textContent = rawData;
+            }
+        }
+
+        function handleLogout() {
+            localStorage.clear();
+            window.location.href = './login.html';
+        }
+    </script>
+</body>
+</html>

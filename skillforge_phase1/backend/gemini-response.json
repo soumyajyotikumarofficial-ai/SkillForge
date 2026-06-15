@@ -4,7 +4,7 @@
       "content": {
         "parts": [
           {
-            "text": "{\"candidate\": {\"name\": \"Soumyajyoti Kumar\", \"email\": \"soumyajyotikumarofficial@gmail.com\", \"phone\": \"+918335987516\", \"location\": \"Chinsurah, Hooghly\", \"highestQualification\": \"Bachelor of Technology in Electrical Engineering\", \"yearsOfExperience\": \"3.5+ years\"}, \"skills\": [\"C# (.NET 8)\", \"Python\", \"SQL (T-SQL, MSSQL Server)\", \"HTML/CSS\", \"JavaScript\", \"LLMs (Ollama/Phi-3)\", \"NLP\", \"Semantic Analysis\", \"Predictive Modeling\", \"Scikit-learn\", \"ASP.NET Core\", \"EF Core\", \"FastAPI\", \"Angular\", \"RESTful APIs\", \"Microservices\", \"Azure DevOps\", \"Docker\", \"RabbitMQ\", \"Hangfire\", \"Power BI (DAX)\", \"xUnit\", \"Moq\", \"SSMS\", \"MSSQL Performance Tuning\", \"PARTITION\", \"PIVOT\", \"Window Functions\"], \"score\": 90, \"summary\": \"Results-driven System Engineer with 3.5+ years of experience delivering enterprise transformation programs for mission-critical, high-availability systems. Possesses demonstrated expertise in .NET 8 and enterprise Java ecosystems, with a strong track record of managing distributed offshore teams. Focused on translating client needs into scalable technical solutions and leveraging AI integration with LLMs and predictive analytics.\"}"
+            "text": "{\n  \"candidate\": {\n    \"name\": \"Soumyajyoti Kumar\",\n    \"email\": \"soumyajyotikumarofficial@gmail.com\",\n    \"phone\": \"+918335987516\",\n    \"location\": \"Chinsurah, Hooghly\",\n    \"highestQualification\": \"Bachelor of Technology in Electrical Engineering\",\n    \"yearsOfExperience\": \"3.5+ years\"\n  },\n  \"skills\": [\n    \"C# (.NET8)\",\n    \"Python\",\n    \"SQL (T-SQL, MSSQL Server)\",\n    \"HTML/CSS\",\n    \"JavaScript\",\n    \"ASP.NET Core\",\n    \"CQRS Pattern\",\n    \"Microservices\",\n    \"RESTful APIs\",\n    \"Entity Framework Core\",\n    \"MSSQL Server\",\n    \"Oracle\",\n    \"Query Optimization\",\n    \"PARTITION\",\n    \"PIVOT\",\n    \"Window Functions\",\n    \"LLMs (Ollama/Phi-3)\",\n    \"NLP\",\n    \"Predictive Modeling\",\n    \"Scikit-learn\",\n    \"FastAPI\",\n    \"PowerBI\",\n    \"Azure DevOps\",\n    \"Docker\",\n    \"RabbitMQ\",\n    \"Hangfire\",\n    \"CI/CD Pipelines\",\n    \"xUnit\",\n    \"Moq\",\n    \"Unit Testing\",\n    \"Integration Testing\"\n  ],\n  \"score\": 90,\n  \"summary\": \"A highly skilled System Engineer with 3.5+ years of experience in delivering enterprise-grade .NET solutions, specializing in backend architecture, CQRS patterns, and microservices. Possessing demonstrated expertise in managing distributed offshore teams and a strong passion for AI/ML, including Generative AI and LLMs, applied through personal projects and professional competency.\"\n}"
           }
         ],
         "role": "model"
@@ -14,18 +14,18 @@
     }
   ],
   "usageMetadata": {
-    "promptTokenCount": 1532,
-    "candidatesTokenCount": 310,
-    "totalTokenCount": 2938,
+    "promptTokenCount": 1597,
+    "candidatesTokenCount": 410,
+    "totalTokenCount": 3189,
     "promptTokensDetails": [
       {
         "modality": "TEXT",
-        "tokenCount": 1532
+        "tokenCount": 1597
       }
     ],
-    "thoughtsTokenCount": 1096,
+    "thoughtsTokenCount": 1182,
     "serviceTier": "standard"
   },
   "modelVersion": "gemini-2.5-flash",
-  "responseId": "LKwtaoKAJvH7juMPweWDyAs"
+  "responseId": "cT0watY64re-vQ_tgqTIBg"
 }

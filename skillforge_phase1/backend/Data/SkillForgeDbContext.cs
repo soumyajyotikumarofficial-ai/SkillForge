@@ -5,135 +5,149 @@ namespace SkillForge.Data;
 
 public class SkillForgeDbContext : DbContext
 {
-    public SkillForgeDbContext(DbContextOptions<SkillForgeDbContext> options) : base(options) { }
+    private readonly ILogger<SkillForgeDbContext> _logger;
 
-    public DbSet<User> Users => Set<User>();
-    public DbSet<Candidate> Candidates => Set<Candidate>();
-    public DbSet<CandidateSkill> CandidateSkills => Set<CandidateSkill>();
-    public DbSet<Job> Jobs => Set<Job>();
-    public DbSet<JobSkill> JobSkills => Set<JobSkill>();
-    public DbSet<JobMatch> JobMatches => Set<JobMatch>();
+    public SkillForgeDbContext(DbContextOptions<SkillForgeDbContext> options, ILogger<SkillForgeDbContext> logger)
+        : base(options)
+    {
+        _logger = logger;
+    }
+
+    public DbSet<User> Users { get; set; }
+    public DbSet<Candidate> Candidates { get; set; }
+    public DbSet<CandidateSkill> CandidateSkills { get; set; }
+    public DbSet<Job> Jobs { get; set; }
+    public DbSet<JobSkill> JobSkills { get; set; }
+    public DbSet<JobMatch> JobMatches { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
 
-        // Users
+        // ===== USER CONFIGURATION =====
+        modelBuilder.Entity<User>()
+            .HasKey(u => u.UserId);
+
         modelBuilder.Entity<User>()
             .HasIndex(u => u.Username)
             .IsUnique();
 
-        // Candidates
-        modelBuilder.Entity<Candidate>()
-            .HasOne(c => c.User)
-            .WithMany(u => u.Candidates)
+        modelBuilder.Entity<User>()
+            .HasIndex(u => u.Email)
+            .IsUnique();
+
+        modelBuilder.Entity<User>()
+            .HasMany(u => u.Candidates)
+            .WithOne(c => c.User)
             .HasForeignKey(c => c.UserId)
             .OnDelete(DeleteBehavior.Cascade);
 
+        // ===== CANDIDATE CONFIGURATION =====
         modelBuilder.Entity<Candidate>()
-            .HasIndex(c => c.Phone)
-            .IsUnique();
+            .HasKey(c => c.CandidateId);
 
-        // CandidateSkills
-        modelBuilder.Entity<CandidateSkill>()
-            .HasOne(cs => cs.Candidate)
-            .WithMany(c => c.Skills)
-            .HasForeignKey(cs => cs.CandidateId)
+        modelBuilder.Entity<Candidate>()
+            .HasMany(c => c.Skills)
+            .WithOne(s => s.Candidate)
+            .HasForeignKey(s => s.CandidateId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        // JobSkills
-        modelBuilder.Entity<JobSkill>()
-            .HasOne(js => js.Job)
-            .WithMany(j => j.RequiredSkills)
-            .HasForeignKey(js => js.JobId)
+        modelBuilder.Entity<Candidate>()
+            .HasMany(c => c.JobMatches)
+            .WithOne(m => m.Candidate)
+            .HasForeignKey(m => m.CandidateId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        // JobMatches
+        // ===== JOB CONFIGURATION =====
+        modelBuilder.Entity<Job>()
+            .HasKey(j => j.JobId);
+
+        modelBuilder.Entity<Job>()
+            .HasMany(j => j.RequiredSkills)
+            .WithOne(s => s.Job)
+            .HasForeignKey(s => s.JobId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<Job>()
+            .HasMany(j => j.Matches)
+            .WithOne(m => m.Job)
+            .HasForeignKey(m => m.JobId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // ===== JOB MATCH CONFIGURATION =====
         modelBuilder.Entity<JobMatch>()
-            .HasOne(jm => jm.Job)
-            .WithMany(j => j.Matches)
-            .HasForeignKey(jm => jm.JobId)
-            .OnDelete(DeleteBehavior.Cascade);
+            .HasKey(m => m.MatchId);
 
-        modelBuilder.Entity<JobMatch>()
-            .HasOne(jm => jm.Candidate)
-            .WithMany(c => c.JobMatches)
-            .HasForeignKey(jm => jm.CandidateId)
-            .OnDelete(DeleteBehavior.Cascade);
+        // ===== SEED DEFAULT DATA =====
+        // ✅ FIX: Use FIXED date instead of DateTime.UtcNow
+        var seedDate = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
-        // Seed data
-        SeedData(modelBuilder);
-    }
-
-    private void SeedData(ModelBuilder modelBuilder)
-    {
-        // Users
+        // Default recruiter user
         modelBuilder.Entity<User>().HasData(
-            new User 
-            { 
-                UserId = 1, 
-                Username = "recruiter", 
-                PasswordHash = BCrypt.Net.BCrypt.HashPassword("recruiter123"), 
-                Email = "recruiter@skillforge.com", 
-                Role = "Recruiter" 
-            },
-            new User 
-            { 
-                UserId = 2, 
-                Username = "candidate1", 
-                PasswordHash = BCrypt.Net.BCrypt.HashPassword("candidate123"), 
-                Email = "candidate1@example.com", 
-                Role = "Candidate" 
+            new User
+            {
+                UserId = 1,
+                Username = "admin",
+                Email = "admin@skillforge.com",
+                PasswordHash = "$2a$11$6r2wEZVCp9v4EL0vPVA8uu7eYQ/qk4jZvJAqEYkLvyTlL6YsH8pf2", // admin123
+                Role = "Recruiter",
+                CreatedAt = seedDate  // ✅ FIXED: Static date
             }
         );
 
-        // Jobs (IT Positions)
-        modelBuilder.Entity<Job>().HasData(
-            new Job { JobId = 1, Title = "Senior Backend Developer", CompanyName = "Tech Corp", Location = "Bangalore", Description = "Build scalable APIs", SalaryRange = "15-20 LPA" },
-            new Job { JobId = 2, Title = "Full Stack Developer", CompanyName = "StartUp Inc", Location = "Mumbai", Description = "React + Node.js", SalaryRange = "12-16 LPA" },
-            new Job { JobId = 3, Title = "DevOps Engineer", CompanyName = "Cloud Systems", Location = "Pune", Description = "AWS, Docker, Kubernetes", SalaryRange = "14-18 LPA" },
-            new Job { JobId = 4, Title = "Frontend Developer", CompanyName = "Digital Agency", Location = "Bangalore", Description = "Angular, React, Vue", SalaryRange = "10-14 LPA" },
-            new Job { JobId = 5, Title = "Database Administrator", CompanyName = "Enterprise Solutions", Location = "Hyderabad", Description = "SQL Server, PostgreSQL", SalaryRange = "12-15 LPA" },
-            new Job { JobId = 6, Title = "Cloud Architect", CompanyName = "Azure Partners", Location = "Delhi", Description = "Design cloud infrastructure", SalaryRange = "18-25 LPA" },
-            new Job { JobId = 7, Title = "QA Engineer", CompanyName = "Quality First", Location = "Chennai", Description = "Automated testing", SalaryRange = "8-12 LPA" },
-            new Job { JobId = 8, Title = "Mobile Developer", CompanyName = "App Makers", Location = "Bangalore", Description = "iOS, Android development", SalaryRange = "11-15 LPA" },
-            new Job { JobId = 9, Title = "Data Engineer", CompanyName = "Analytics Pro", Location = "Bangalore", Description = "Big Data, ETL pipelines", SalaryRange = "14-19 LPA" },
-            new Job { JobId = 10, Title = "Security Engineer", CompanyName = "SecureNet", Location = "Gurgaon", Description = "Application security", SalaryRange = "16-22 LPA" }
-        );
-
-        // Job Skills
-        var jobSkillsData = new List<JobSkill>
+        // Seed sample jobs
+        var sampleJobs = new[]
         {
-            // Job 1: Backend Developer
-            new JobSkill { Id = 1, JobId = 1, SkillName = "C#", IsRequired = true },
-            new JobSkill { Id = 2, JobId = 1, SkillName = "ASP.NET Core", IsRequired = true },
-            new JobSkill { Id = 3, JobId = 1, SkillName = "SQL Server", IsRequired = true },
-            new JobSkill { Id = 4, JobId = 1, SkillName = "Azure", IsRequired = false },
-            
-            // Job 2: Full Stack Developer
-            new JobSkill { Id = 5, JobId = 2, SkillName = "React", IsRequired = true },
-            new JobSkill { Id = 6, JobId = 2, SkillName = "Node.js", IsRequired = true },
-            new JobSkill { Id = 7, JobId = 2, SkillName = "JavaScript", IsRequired = true },
-            new JobSkill { Id = 8, JobId = 2, SkillName = "MongoDB", IsRequired = false },
-            
-            // Job 3: DevOps Engineer
-            new JobSkill { Id = 9, JobId = 3, SkillName = "Docker", IsRequired = true },
-            new JobSkill { Id = 10, JobId = 3, SkillName = "Kubernetes", IsRequired = true },
-            new JobSkill { Id = 11, JobId = 3, SkillName = "AWS", IsRequired = true },
-            new JobSkill { Id = 12, JobId = 3, SkillName = "Linux", IsRequired = true },
-            
-            // Job 4: Frontend Developer
-            new JobSkill { Id = 13, JobId = 4, SkillName = "React", IsRequired = true },
-            new JobSkill { Id = 14, JobId = 4, SkillName = "TypeScript", IsRequired = true },
-            new JobSkill { Id = 15, JobId = 4, SkillName = "HTML", IsRequired = true },
-            new JobSkill { Id = 16, JobId = 4, SkillName = "CSS", IsRequired = true },
-            
-            // Job 5: Database Administrator
-            new JobSkill { Id = 17, JobId = 5, SkillName = "SQL Server", IsRequired = true },
-            new JobSkill { Id = 18, JobId = 5, SkillName = "PostgreSQL", IsRequired = true },
-            new JobSkill { Id = 19, JobId = 5, SkillName = "Backup & Recovery", IsRequired = true }
+            new { JobId = 1, Title = "C# Developer", Skills = new[] { "C#", "ASP.NET Core", "SQL Server" } },
+            new { JobId = 2, Title = "React Developer", Skills = new[] { "React", "TypeScript", "CSS" } },
+            new { JobId = 3, Title = "DevOps Engineer", Skills = new[] { "Docker", "Kubernetes", "Azure" } },
+            new { JobId = 4, Title = "Data Engineer", Skills = new[] { "Python", "SQL", "Spark" } },
+            new { JobId = 5, Title = "Full Stack Developer", Skills = new[] { "C#", "React", "SQL Server", "Azure" } }
         };
 
-        modelBuilder.Entity<JobSkill>().HasData(jobSkillsData);
+        foreach (var job in sampleJobs)
+        {
+            modelBuilder.Entity<Job>().HasData(
+                new Job
+                {
+                    JobId = job.JobId,
+                    Title = job.Title,
+                    Description = $"Looking for an experienced {job.Title}",
+                    CompanyName = "SkillForge Inc",
+                    Location = "Remote",
+                    SalaryRange = "50000-120000",
+                    CreatedAt = seedDate  // ✅ FIXED: Static date
+                }
+            );
+
+            foreach (var skill in job.Skills)
+            {
+                var skillIndex = Array.IndexOf(job.Skills, skill);
+                modelBuilder.Entity<JobSkill>().HasData(
+                    new JobSkill
+                    {
+                        Id = (job.JobId * 10) + skillIndex + 1,
+                        JobId = job.JobId,
+                        SkillName = skill,
+                        IsRequired = true,
+                        ProficiencyLevel = 4
+                    }
+                );
+            }
+        }
+    }
+
+    public override int SaveChanges()
+    {
+        var result = base.SaveChanges();
+        _logger.LogInformation("✅ Database changes saved successfully at {Time}", DateTime.UtcNow);
+        return result;
+    }
+
+    public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        var result = await base.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("✅ Database changes saved asynchronously at {Time}", DateTime.UtcNow);
+        return result;
     }
 }

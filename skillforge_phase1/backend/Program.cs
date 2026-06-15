@@ -1,58 +1,103 @@
-using Microsoft.AspNetCore.Builder;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using System.Text;
+using SkillForge.Data;
 using SkillForge.API.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add logging
-builder.Logging.ClearProviders();
-builder.Logging.AddConsole();
-builder.Logging.AddDebug();
-builder.Services.AddLogging(config =>
+// ===== ENFORCE SYSTEM NETWORK BINDING HUB =====
+builder.WebHost.ConfigureKestrel(options =>
 {
-    config.SetMinimumLevel(LogLevel.Information);
-    config.AddConsole();
-    config.AddDebug();
+    options.ListenLocalhost(5123, listenOptions => listenOptions.UseHttps());
+    options.ListenLocalhost(5000);
 });
 
-// Add services
+// ===== REGISTER MVC FRAMEWORK ENGINE BINDINGS =====
 builder.Services.AddControllers();
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+
+builder.Services.AddDbContext<SkillForgeDbContext>(options =>
+    options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=skillforge.db")
+);
+
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<AIService>();
 
-// Add CORS - Allow frontend
+// ===== AUTHENTICATION MIDDLEWARE SCHEMAS =====
+var jwtKey = builder.Configuration["Jwt:Key"] ?? "your-secret-key-must-be-at-least-32-characters-long-here!!!!";
+var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "SkillForge";
+var jwtAudience = builder.Configuration["Jwt:Audience"] ?? "SkillForgeUsers";
+
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
+            ValidateIssuer = true,
+            ValidIssuer = jwtIssuer,
+            ValidateAudience = true,
+            ValidAudience = jwtAudience,
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.Zero
+        };
+    });
+
+// ===== CROSS ORIGIN COMPONENT POOL SETUP =====
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
-        policy
-            .WithOrigins(
-                "http://localhost:5173",
-                "http://127.0.0.1:5173",
-                "http://localhost:3000",
-                "http://127.0.0.1:3000"
-            )
-            .AllowAnyMethod()
-            .AllowAnyHeader()
-            .AllowCredentials();
+        policy.AllowAnyOrigin()
+              .AllowAnyMethod()
+              .AllowAnyHeader();
     });
+});
+
+builder.Services.AddLogging(config =>
+{
+    config.AddConsole();
+    config.AddDebug();
 });
 
 var app = builder.Build();
 
-// Use CORS
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
+
+app.UseHttpsRedirection();
+
+// UseCors must pre-load prior to processing routing contexts
 app.UseCors("AllowFrontend");
+
+// Explicitly register endpoint resolution matrices early
 app.UseRouting();
 
-// Map controllers
+app.UseAuthentication();
+app.UseAuthorization();
+
 app.MapControllers();
 
-// Health check
-app.MapGet("/health", () => Results.Ok(new { status = "OK" }));
-app.MapGet("/", () => Results.Json(new { message = "SkillForge API Running" }));
-
-var logger = app.Services.GetRequiredService<ILogger<Program>>();
-logger.LogInformation("Starting SkillForge API");
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<SkillForgeDbContext>();
+    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+    try
+    {
+        db.Database.EnsureCreated();
+        logger.LogInformation("✅ Database initialized successfully");
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "❌ Database initialization error");
+    }
+}
 
 app.Run();

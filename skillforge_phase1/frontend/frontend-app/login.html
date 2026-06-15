@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SkillForge - Login & Registration</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 450px;
+            width: 100%;
+        }
+
+        .logo-section {
+            text-align: center;
+            color: white;
+            margin-bottom: 40px;
+        }
+
+        .logo-section h1 {
+            font-size: 36px;
+            margin-bottom: 10px;
+        }
+
+        .logo-section p {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        /* Role Selection Screen */
+        .role-selection {
+            display: none;
+            background: white;
+            border-radius: 10px;
+            padding: 40px 30px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+        }
+
+        .role-selection.show {
+            display: block;
+        }
+
+        .role-selection h2 {
+            color: #333;
+            margin-bottom: 30px;
+            text-align: center;
+            font-size: 24px;
+        }
+
+        .role-buttons {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+
+        .role-btn {
+            padding: 30px 20px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            background: white;
+            cursor: pointer;
+            text-align: center;
+            transition: all 0.3s;
+            font-size: 14px;
+        }
+
+        .role-btn:hover {
+            border-color: #667eea;
+            background: #f9f9ff;
+        }
+
+        .role-btn.active {
+            border-color: #667eea;
+            background: #f0f0ff;
+            color: #667eea;
+        }
+
+        .role-btn .icon {
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+
+        .role-btn .label {
+            font-weight: 600;
+            display: block;
+        }
+
+        .role-btn .desc {
+            font-size: 12px;
+            color: #999;
+            margin-top: 8px;
+        }
+
+        .role-action-btn {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            margin-top: 30px;
+            transition: transform 0.2s;
+        }
+
+        .role-action-btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .role-action-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Auth Form */
+        .auth-form {
+            display: none;
+            background: white;
+            border-radius: 10px;
+            padding: 40px 30px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+        }
+
+        .auth-form.show {
+            display: block;
+        }
+
+        .form-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 30px;
+            gap: 10px;
+        }
+
+        .form-header button {
+            background: none;
+            border: none;
+            color: #667eea;
+            font-size: 24px;
+            cursor: pointer;
+        }
+
+        .form-header h2 {
+            color: #333;
+            font-size: 24px;
+            flex: 1;
+        }
+
+        .form-header .role-badge {
+            background: #f0f0ff;
+            color: #667eea;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            color: #333;
+            font-weight: 600;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #e0e0e0;
+            border-radius: 5px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .form-group input.error {
+            border-color: #ff6b6b;
+            background: #fff5f5;
+        }
+
+        .error-message {
+            color: #ff6b6b;
+            font-size: 12px;
+            margin-top: 4px;
+            display: none;
+        }
+
+        .error-message.show {
+            display: block;
+        }
+
+        .success-message {
+            background: #efe;
+            color: #3c3;
+            padding: 12px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            display: none;
+            font-size: 14px;
+        }
+
+        .success-message.show {
+            display: block;
+        }
+
+        .submit-btn {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: transform 0.2s;
+        }
+
+        .submit-btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .submit-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .toggle-form {
+            text-align: center;
+            margin-top: 20px;
+            font-size: 14px;
+            color: #666;
+        }
+
+        .toggle-form a {
+            color: #667eea;
+            cursor: pointer;
+            font-weight: 600;
+            text-decoration: none;
+        }
+
+        .toggle-form a:hover {
+            text-decoration: underline;
+        }
+
+        .loader {
+            display: none;
+            text-align: center;
+        }
+
+        .loader.show {
+            display: block;
+        }
+
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        @media (max-width: 600px) {
+            .role-buttons {
+                grid-template-columns: 1fr;
+            }
+
+            .logo-section h1 {
+                font-size: 28px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo-section">
+            <h1>🎯 SkillForge</h1>
+            <p>AI-Powered Job Matching Platform</p>
+        </div>
+
+        <div class="role-selection show" id="roleSelection">
+            <h2>Choose Your Role</h2>
+            <div class="role-buttons">
+                <button class="role-btn" onclick="selectRole('candidate')" id="roleBtn-candidate">
+                    <div class="icon">👤</div>
+                    <span class="label">Candidate</span>
+                    <span class="desc">Upload resume & find jobs</span>
+                </button>
+                <button class="role-btn" onclick="selectRole('recruiter')" id="roleBtn-recruiter">
+                    <div class="icon">🏢</div>
+                    <span class="label">Recruiter</span>
+                    <span class="desc">Post jobs & find talent</span>
+                </button>
+            </div>
+            <button class="role-action-btn" onclick="proceedWithRole()" id="roleActionBtn" disabled>Continue</button>
+        </div>
+
+        <div class="auth-form" id="authForm">
+            <div class="form-header">
+                <button onclick="backToRoleSelection()">←</button>
+                <h2 id="formTitle">Login</h2>
+                <span class="role-badge" id="roleBadge">Candidate</span>
+            </div>
+
+            <div class="success-message" id="successMessage"></div>
+
+            <form id="loginForm" style="display: none;">
+                <div class="form-group">
+                    <label>Username</label>
+                    <input type="text" id="loginUsername" placeholder="Enter your username" required>
+                    <div class="error-message" id="loginUsernameError"></div>
+                </div>
+
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" id="loginPassword" placeholder="Enter your password" required>
+                    <div class="error-message" id="loginPasswordError"></div>
+                </div>
+
+                <div class="loader" id="loginLoader">
+                    <div class="spinner"></div>
+                </div>
+
+                <button type="submit" class="submit-btn" id="loginSubmitBtn">Login</button>
+
+                <div class="toggle-form">
+                    Don't have an account? <a onclick="switchToRegister()">Sign Up</a>
+                </div>
+            </form>
+
+            <form id="registerForm" style="display: none;">
+                <div class="form-group">
+                    <label>Username</label>
+                    <input type="text" id="registerUsername" placeholder="Choose a username" required>
+                    <div class="error-message" id="registerUsernameError"></div>
+                </div>
+
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" id="registerEmail" placeholder="Enter your email" required>
+                    <div class="error-message" id="registerEmailError"></div>
+                </div>
+
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" id="registerPassword" placeholder="Create a password (min 6 chars)" required>
+                    <div class="error-message" id="registerPasswordError"></div>
+                </div>
+
+                <div class="form-group">
+                    <label>Confirm Password</label>
+                    <input type="password" id="registerConfirmPassword" placeholder="Confirm your password" required>
+                    <div class="error-message" id="registerConfirmPasswordError"></div>
+                </div>
+
+                <div class="loader" id="registerLoader">
+                    <div class="spinner"></div>
+                </div>
+
+                <button type="submit" class="submit-btn" id="registerSubmitBtn">Sign Up</button>
+
+                <div class="toggle-form">
+                    Already have an account? <a onclick="switchToLogin()">Login</a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // ✅ DYNAMIC PORT RESOLUTION: Fallback safely if backend runs on .NET standard ports
+        const BACKEND_PORTS = ['5123', '7123', '5000'];
+        let API_URL = 'http://localhost:5123/api'; // Primary target
+
+        let selectedRole = null;
+
+        // ========== ROLE SELECTION ==========
+
+        function selectRole(role) {
+            selectedRole = role;
+            console.log('Role selected:', role);
+
+            // Update button states
+            document.getElementById('roleBtn-candidate').classList.remove('active');
+            document.getElementById('roleBtn-recruiter').classList.remove('active');
+            document.getElementById('roleBtn-' + role).classList.add('active');
+
+            // Enable continue button
+            document.getElementById('roleActionBtn').disabled = false;
+        }
+
+        function proceedWithRole() {
+            if (!selectedRole) return;
+
+            console.log('Proceeding with role:', selectedRole);
+            const roleText = selectedRole === 'candidate' ? 'Candidate' : 'Recruiter';
+            document.getElementById('roleBadge').textContent = roleText;
+
+            // Hide role selection, show auth form
+            document.getElementById('roleSelection').classList.remove('show');
+            document.getElementById('authForm').classList.add('show');
+
+            // Show login form by default
+            showLoginForm();
+        }
+
+        function backToRoleSelection() {
+            selectedRole = null;
+            document.getElementById('authForm').classList.remove('show');
+            document.getElementById('roleSelection').classList.add('show');
+            document.getElementById('roleBtn-candidate').classList.remove('active');
+            document.getElementById('roleBtn-recruiter').classList.remove('active');
+            document.getElementById('roleActionBtn').disabled = true;
+            clearForm();
+        }
+
+        // ========== FORM SWITCHING ==========
+
+        function showLoginForm() {
+            document.getElementById('loginForm').style.display = 'block';
+            document.getElementById('registerForm').style.display = 'none';
+            document.getElementById('formTitle').textContent = 'Login';
+        }
+
+        function switchToRegister() {
+            document.getElementById('loginForm').style.display = 'none';
+            document.getElementById('registerForm').style.display = 'block';
+            document.getElementById('formTitle').textContent = 'Sign Up';
+            clearForm();
+        }
+
+        function switchToLogin() {
+            showLoginForm();
+            clearForm();
+        }
+
+        function clearForm() {
+            document.getElementById('loginForm').reset();
+            document.getElementById('registerForm').reset();
+            clearErrors();
+        }
+
+        function clearFormFieldsOnly() {
+             document.getElementById('loginUsername').value = "";
+             document.getElementById('loginPassword').value = "";
+        }
+
+        function clearErrors() {
+            document.querySelectorAll('.error-message').forEach(el => el.classList.remove('show'));
+            document.querySelectorAll('input').forEach(el => el.classList.remove('error'));
+        }
+
+        // ========== API CALL HELPER WITH RE-TRY ENGINE ==========
+        async function fetchWithFallback(endpoint, options, attempt = 0) {
+            try {
+                const currentUrl = `http://localhost:${BACKEND_PORTS[attempt]}/api${endpoint}`;
+                console.log(`Routing execution pipeline to target node: ${currentUrl}`);
+                
+                const response = await fetch(currentUrl, options);
+                
+                // If it's an HTTP error code context, handle gracefully inside parsing
+                if (!response.ok && response.status !== 400 && response.status !== 401) {
+                    throw new Error(`Server returned status: ${response.status}`);
+                }
+                
+                // Track current active URL configuration baseline
+                API_URL = `http://localhost:${BACKEND_PORTS[attempt]}/api`;
+                return response;
+            } catch (error) {
+                console.warn(`Port mapping deployment down at index ${attempt} (Port: ${BACKEND_PORTS[attempt]}). Error: ${error.message}`);
+                if (attempt + 1 < BACKEND_PORTS.length) {
+                    return await fetchWithFallback(endpoint, options, attempt + 1);
+                }
+                throw new Error("No active web service listening on configured system ports (5123, 7123, 5000). Verify backend logic is running.");
+            }
+        }
+
+        // ========== LOGIN ==========
+
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            clearErrors();
+
+            const username = document.getElementById('loginUsername').value.trim();
+            const password = document.getElementById('loginPassword').value;
+
+            // Validation
+            if (!username) {
+                showError('loginUsernameError', 'Username is required');
+                return;
+            }
+            if (!password) {
+                showError('loginPasswordError', 'Password is required');
+                return;
+            }
+
+            // API Call
+            const loginBtn = document.getElementById('loginSubmitBtn');
+            const loader = document.getElementById('loginLoader');
+
+            loginBtn.disabled = true;
+            loader.classList.add('show');
+
+            try {
+                console.log('Logging in user tracking metric:', username);
+                // ✅ UPDATED ROUTE: Pointing to /Candidate/login instead of /auth/login
+                const response = await fetchWithFallback('/Candidate/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+
+                // Read safely without crashing on null streams
+                const textData = await response.text();
+                if (!textData) {
+                    throw new Error("Empty binary response stream returned by system endpoint pipeline.");
+                }
+
+                const data = JSON.parse(textData);
+                console.log('Login engine parsed payload:', data);
+
+                // ✅ UPDATED STRUCTURAL CHECK: Handles your mock object configuration successfully
+                if (response.ok && (data.token || data.user)) {
+                    // Save token & username
+                    localStorage.setItem('token', data.token || 'mock-jwt-token-for-local-testing-purposes');
+                    localStorage.setItem('username', username);
+                    localStorage.setItem('role', selectedRole);
+
+                    console.log('Login successful, routing document reference...');
+                    
+                    // Redirect based on role
+                    if (selectedRole === 'candidate') {
+                        window.location.href = '/candidate-dashboard.html';
+                    } else {
+                        window.location.href = '/recruiter-dashboard.html';
+                    }
+                } else {
+                    showError('loginPasswordError', data.error || 'Access denied. Invalid system credentials.');
+                    clearFormFieldsOnly();
+                }
+            } catch (error) {
+                console.error('Login processing fault encountered:', error);
+                showError('loginPasswordError', 'Network connection error: ' + error.message);
+            } finally {
+                loginBtn.disabled = false;
+                loader.classList.remove('show');
+            }
+        });
+
+        // ========== REGISTER ==========
+
+        document.getElementById('registerForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            clearErrors();
+
+            const username = document.getElementById('registerUsername').value.trim();
+            const email = document.getElementById('registerEmail').value.trim();
+            const password = document.getElementById('registerPassword').value;
+            const confirmPassword = document.getElementById('registerConfirmPassword').value;
+
+            // Validation
+            if (!username || username.length < 3) {
+                showError('registerUsernameError', 'Username must be at least 3 characters');
+                return;
+            }
+            if (!email || !email.includes('@')) {
+                showError('registerEmailError', 'Valid email is required');
+                return;
+            }
+            if (!password || password.length < 6) {
+                showError('registerPasswordError', 'Password must be at least 6 characters');
+                return;
+            }
+            if (password !== confirmPassword) {
+                showError('registerConfirmPasswordError', 'Passwords do not match');
+                return;
+            }
+
+            // API Call
+            const registerBtn = document.getElementById('registerSubmitBtn');
+            const loader = document.getElementById('registerLoader');
+
+            registerBtn.disabled = true;
+            loader.classList.add('show');
+
+            try {
+                console.log('Registering user data footprint:', username, email, selectedRole);
+                // ✅ UPDATED ROUTE: Pointing to /Candidate/register instead of /auth/register
+                const response = await fetchWithFallback('/Candidate/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username,
+                        email,
+                        password,
+                        role: selectedRole === 'candidate' ? 'Candidate' : 'Recruiter'
+                    })
+                });
+
+                const textData = await response.text();
+                if (!textData) {
+                    throw new Error("Empty compilation data structure returned during registration.");
+                }
+
+                const data = JSON.parse(textData);
+                console.log('Register engine response parsed:', data);
+
+                if (response.ok) {
+                    localStorage.setItem('token', data.token || 'mock-jwt-token-for-local-testing-purposes');
+                    localStorage.setItem('username', username);
+                    localStorage.setItem('role', selectedRole);
+
+                    console.log('Registration complete. Loading user identity profile...');
+                    
+                    if (selectedRole === 'candidate') {
+                        window.location.href = '/candidate-dashboard.html';
+                    } else {
+                        window.location.href = '/recruiter-dashboard.html';
+                    }
+                } else {
+                    showError('registerEmailError', data.error || 'Registration sequence interrupted.');
+                }
+            } catch (error) {
+                console.error('Register operations system error:', error);
+                showError('registerEmailError', 'Network connection error: ' + error.message);
+            } finally {
+                registerBtn.disabled = false;
+                loader.classList.remove('show');
+            }
+        });
+
+        // ========== HELPERS ==========
+
+        function showError(elementId, message) {
+            const errorEl = document.getElementById(elementId);
+            const inputId = elementId.replace('Error', '');
+            const inputEl = document.getElementById(inputId);
+
+            errorEl.textContent = message;
+            errorEl.classList.add('show');
+            if (inputEl) inputEl.classList.add('error');
+        }
+
+        // Check if already logged in
+        window.addEventListener('load', () => {
+            const token = localStorage.getItem('token');
+            if (token) {
+                const role = localStorage.getItem('role');
+                if (role === 'candidate') {
+                    window.location.href = '/candidate-dashboard.html';
+                } else if (role === 'recruiter') {
+                    window.location.href = '/recruiter-dashboard.html';
+                }
+            }
+        });
+
+        console.log('Active UI Login page module initialization finalized.');
+    </script>
+</body>
+</html>
