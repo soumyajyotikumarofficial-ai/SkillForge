@@ -1,6 +1,6 @@
 using System;
 using System.IO;
-using System.Linq; // Added for .FirstOrDefault() and .Select() query extensions
+using System.Linq; 
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Net.Http;
@@ -9,7 +9,7 @@ using System.Text;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using Microsoft.AspNetCore.Http; // Added for IFormFile structural parameters
+using Microsoft.AspNetCore.Http;
 
 namespace SkillForge.API.Services;
 
@@ -37,7 +37,7 @@ public class AIService
     /// Unified entry-point: Receives the uploaded raw browser file, extracts its underlying content, 
     /// and dispatches the structured string metrics straight into the Gemini AI Engine.
     /// </summary>
-    public async Task<object> ProcessAndAnalyzeResumeAsync(IFormFile file)
+    public async Task<object?> ProcessAndAnalyzeResumeAsync(IFormFile file)
     {
         if (file == null || file.Length == 0)
         {
@@ -88,7 +88,7 @@ public class AIService
         }
     }
 
-    public async Task<object> AnalyzeResumeAsync(string text)
+    public async Task<object?> AnalyzeResumeAsync(string text)
     {
         try
         {
@@ -98,7 +98,7 @@ public class AIService
             if (string.IsNullOrWhiteSpace(apiKey) || string.IsNullOrWhiteSpace(endpoint))
             {
                 _logger.LogError("Gemini API credentials not configured");
-                return new { error = "API credentials missing" };
+                return null;
             }
 
             var client = _httpFactory.CreateClient();
@@ -118,6 +118,7 @@ LINGUISTIC RECOVERY RULES:
 2. **candidate.yearsOfExperience**: Extract the numeric value and the unit. Ensure you do NOT duplicate the word 'years' (absolutely NEVER output '3.5+ years years').
 3. **Case Normalization**: For fields like names, job titles, and locations, convert solid UPPERCASE strings into standard Title Case with proper spacing. Do not pass run-on strings to the JSON.
 4. **summary**: Synthesize a fluid, grammatically correct 2-3 sentence professional summary highlighting their core development stack with clean word spacing.
+5. **score**: Calculate a completely dynamic integer ranking between 0 and 100 based on the absolute data completeness and formatting of the provided text. Never output a default or hardcoded number.
 
 Resume Text to Repair and Parse:
 {text}
@@ -139,8 +140,8 @@ Resume Text to Repair and Parse:
                 },
                 generationConfig = new
                 {
-                    temperature = 0.1,
-                    maxOutputTokens = 2048,
+                    temperature = 0.2,
+                    maxOutputTokens = 4000, // ✅ Fixed: Expanded token window length prevents text truncation errors
                     responseMimeType = "application/json",
                     responseSchema = new
                     {
@@ -169,7 +170,7 @@ Resume Text to Repair and Parse:
                             score = new 
                             { 
                                 type = "integer", 
-                                description = "An overall suitability score from 0 to 100 based on the resume quality and completeness." 
+                                description = "An overall dynamic suitability score from 0 to 100 based strictly on resume quality and details provided." 
                             },
                             summary = new { type = "string" }
                         },
@@ -182,13 +183,10 @@ Resume Text to Repair and Parse:
             var response = await client.PostAsync(url, new StringContent(json, Encoding.UTF8, "application/json"));
             var responseText = await response.Content.ReadAsStringAsync();
 
-            File.WriteAllText("gemini-response.json", responseText);
-            _logger.LogInformation("FULL RESPONSE LENGTH: {Length}", responseText.Length);
-
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogError("Gemini API error: {StatusCode} {Body}", response.StatusCode, responseText);
-                return new { error = "API error", details = responseText };
+                return null;
             }
 
             using var doc = JsonDocument.Parse(responseText);
@@ -201,7 +199,7 @@ Resume Text to Repair and Parse:
                 .GetString() ?? "{}";
 
             _logger.LogInformation("========== RAW CLEANED JSON FROM GEMINI ==========");
-            _logger.LogInformation(geminiText);
+            _logger.LogInformation("{Text}", geminiText);
             _logger.LogInformation("==================================================");
 
             using var parsed = JsonDocument.Parse(geminiText);
@@ -209,10 +207,10 @@ Resume Text to Repair and Parse:
 
             if (!root.TryGetProperty("candidate", out var candidateObj))
             {
-                return new { error = "Candidate object missing", rawResponse = geminiText };
+                _logger.LogError("Candidate object missing from inner parse extraction payload.");
+                return null;
             }
 
-            // Leverage your GetStringValue helper cleanly to manage nulls/untyped mutations safely
             var candidate = new
             {
                 name = GetStringValue(candidateObj, "name").Replace("years years", "years", StringComparison.OrdinalIgnoreCase).Trim(),
@@ -253,7 +251,7 @@ Resume Text to Repair and Parse:
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error analyzing resume text parsing structure strings.");
-            return new { error = "Processing error", details = ex.Message };
+            return null;
         }
     }
 
@@ -282,7 +280,7 @@ Resume Text to Repair and Parse:
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error extracting text streams out of target PDF structure components.");
+            _logger.LogError(ex, "Error extracting text strings out of target PDF structure components.");
             throw;
         }
     }
@@ -306,7 +304,7 @@ Resume Text to Repair and Parse:
                     var textNodes = doc.GetElementsByTagName("w:t");
                     foreach (System.Xml.XmlElement node in textNodes)
                     {
-                        text.Append(node.InnerText + " "); // Added tracking space padding token gaps between tags safely
+                        text.Append(node.InnerText + " ");
                     }
                 }
             }

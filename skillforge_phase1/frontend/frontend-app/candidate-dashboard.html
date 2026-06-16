@@ -55,7 +55,7 @@
         /* Summary Row: Score Box + Personal Box */
         .summary-header-row { display: grid; grid-template-columns: 150px 1fr; gap: 20px; align-items: center; }
         
-        /* Filled Progress Score Counter Display */
+        /* Progress Score Counter Display */
         .score-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; height: 160px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; box-shadow: 0 1px 2px rgba(0,0,0,0.02); }
         
         /* Conic Gradient Wrapper for Accurate Radial Filling */
@@ -82,6 +82,17 @@
         .skill-badge { background: #eef2ff; color: var(--primary); padding: 6px 14px; border-radius: 9999px; font-size: 13px; font-weight: 600; border: 1px solid #e0e7ff; transition: all 0.2s; }
         .skill-badge:hover { transform: translateY(-1px); background: #e0e7ff; box-shadow: 0 2px 4px rgba(79, 70, 229, 0.1); }
 
+        /* Job Card Recommendation Engine Styling */
+        .jobs-list-container { display: flex; flex-direction: column; gap: 16px; margin-top: 12px; }
+        .job-card { border: 1px solid var(--border); padding: 20px; border-radius: 12px; background: #ffffff; transition: transform 0.2s, box-shadow 0.2s; }
+        .job-card:hover { transform: translateY(-2px); box-shadow: 0 6px 12px rgba(0,0,0,0.05); }
+        .job-card-header { display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px; }
+        .job-title { font-size: 16px; font-weight: 700; color: var(--text-dark); }
+        .job-company { font-size: 14px; color: var(--primary); font-weight: 600; margin-top: 2px; }
+        .job-meta-pill { background: #f0fdf4; color: #16a34a; font-weight: 700; font-size: 12px; padding: 4px 10px; border-radius: 6px; }
+        .job-details-row { display: flex; gap: 16px; font-size: 13px; color: var(--text-muted); margin-bottom: 12px; }
+        .skills-match-info { font-size: 13px; line-height: 1.5; padding-top: 8px; border-top: 1px dashed var(--border); }
+
         .spinner { width: 20px; height: 20px; border: 3px solid rgba(255,255,255,0.3); border-radius: 50%; border-top-color: white; animation: spin 0.8s linear infinite; display: none; }
         .spinner.show { display: inline-block; }
         @keyframes spin { to { transform: rotate(360deg); } }
@@ -105,7 +116,6 @@
         </div>
 
         <div class="content-grid">
-            <!-- Left Panel: Upload Form Controller -->
             <div class="panel">
                 <h3>Resume Upload</h3>
                 <div class="upload-container" onclick="document.getElementById('resumeInput').click()">
@@ -122,22 +132,17 @@
                 </button>
             </div>
 
-            <!-- Right Panel: Dashboard Metrics Results View Canvas -->
             <div class="panel" style="min-height: 500px;">
                 <h3>Analysis Dashboard</h3>
                 
-                <!-- Initial Empty Standby Placeholder -->
                 <div id="placeholderView" style="text-align: center; color: var(--text-muted); padding-top: 120px;">
                     <span style="font-size: 48px; display: block; margin-bottom: 12px;">📊</span>
                     <p>No document data processed yet. Run analysis to display engine metrics logs.</p>
                 </div>
 
-                <!-- Structured Dynamic Response Output Canvas Container -->
                 <div id="resultsWrapper" class="results-wrapper">
                     
-                    <!-- Top horizontal dashboard matrix block split components -->
                     <div class="summary-header-row">
-                        <!-- Filled Progress Ring Score Card -->
                         <div class="score-card">
                             <div id="scoreRing" class="score-progress-ring">
                                 <div class="score-circle-inner">
@@ -147,7 +152,6 @@
                             </div>
                         </div>
 
-                        <!-- Personal Details Identity Grid Display Card -->
                         <div class="details-card">
                             <h4 id="candidateName">Candidate Identity</h4>
                             <div class="details-grid">
@@ -159,19 +163,23 @@
                         </div>
                     </div>
 
-                    <!-- AI ANALYSIS SUMMARY SECTION -->
                     <div class="info-section">
                         <div class="section-header">🤖 AI Executive Summary</div>
                         <p id="analysisSummary" class="summary-text">Extracting parsed context values...</p>
                     </div>
 
-                    <!-- IDENTIFIED SKILLS TAGS BADGES CORE SECTION -->
                     <div class="info-section">
                         <div class="section-header">🛠️ Technical Skills Core Matrix</div>
                         <div id="skillsContainer" class="skills-grid">
-                            <!-- Injected badges populate here dynamically -->
-                        </div>
+                            </div>
                     </div>
+
+                    <div class="info-section">
+                        <div class="section-header">💼 Targeted Automated Matches</div>
+                        <div id="jobsContainer" class="jobs-list-container">
+                            </div>
+                    </div>
+
                 </div>
             </div>
         </div>
@@ -225,6 +233,7 @@
 
             let responseSuccess = false;
             let outputText = "";
+            let serverErrorMessage = "";
 
             for (let i = 0; i < BACKEND_PORTS.length; i++) {
                 try {
@@ -242,6 +251,15 @@
                         outputText = await response.text();
                         responseSuccess = true;
                         break;
+                    } else {
+                        // Capture the customized API warning from our backend payload if available
+                        const errData = await response.json().catch(() => ({}));
+                        serverErrorMessage = errData.error || `Server responded with status code: ${response.status}`;
+                        
+                        // If the backend answered but broke inside, do not loop other ports
+                        if (response.status >= 400 && response.status < 600) {
+                            break;
+                        }
                     }
                 } catch (err) {
                     console.warn(`Connection dropped on local target channel port ${BACKEND_PORTS[i]}.`);
@@ -257,7 +275,11 @@
                 resultsWrapper.classList.add('show');
                 renderBeautifulMetrics(outputText);
             } else {
-                alert("Failed to establish processing context link updates. Ensure backend instances are up.");
+                if (serverErrorMessage) {
+                    alert(`AI Ingestion Error: ${serverErrorMessage}`);
+                } else {
+                    alert("Failed to establish processing context link updates. Ensure backend instances are up.");
+                }
             }
         }
 
@@ -265,15 +287,16 @@
             try {
                 const data = JSON.parse(rawData);
                 
-                // 1. DYNAMIC FILLING SCORE COMPONENT
+                // 1. Progress Score Counter Display
                 const targetScore = Math.min(Math.max(parseInt(data.score) || 0, 0), 100); 
                 document.getElementById('scoreNumber').textContent = targetScore;
                 
-                // Dynamically update the CSS conic-gradient fill on the outer ring circle
                 const scoreRing = document.getElementById('scoreRing');
-                scoreRing.style.background = `conic-gradient(var(--success) 0% ${targetScore}%, #cbd5e1 ${targetScore}% 100%)`;
+                if (scoreRing) {
+                    scoreRing.style.background = `conic-gradient(var(--success) 0% ${targetScore}%, #cbd5e1 ${targetScore}% 100%)`;
+                }
 
-                // 2. Parse Profile Identity Values
+                // 2. Personal Details Identity Grid Display
                 const candidate = data.candidate || {};
                 document.getElementById('candidateName').textContent = candidate.name || "Unknown Professional";
                 document.getElementById('candidateEmail').textContent = candidate.email || "N/A";
@@ -281,23 +304,65 @@
                 document.getElementById('candidateLocation').textContent = candidate.location || "N/A";
                 document.getElementById('candidateEducation').textContent = candidate.highestQualification || "Not Specified";
 
-                // 3. Render Profile Summarization Block
+                // 3. AI Analysis Executive Summary Block
                 document.getElementById('analysisSummary').textContent = data.summary || "No executive text breakdown recorded by the AI module engine.";
 
-                // 4. Generate dynamic skill profile mapping badges
+                // 4. SMART FALLBACK BADGE EVALUATION BLOCK (Fixes [object Object] Bug)
                 const skillsContainer = document.getElementById('skillsContainer');
                 skillsContainer.innerHTML = ''; 
 
                 const skillList = data.skills || [];
                 if (skillList.length > 0) {
-                    skillList.forEach(skill => {
+                    skillList.forEach(skillItem => {
+                        let textToDisplay = "";
+
+                        // Safe type evaluation pattern to unpack any accidentally nested object entities
+                        if (typeof skillItem === 'object' && skillItem !== null) {
+                            textToDisplay = skillItem.skillName || skillItem.name || JSON.stringify(skillItem);
+                        } else {
+                            textToDisplay = skillItem;
+                        }
+
                         const spanBadge = document.createElement('span');
                         spanBadge.className = 'skill-badge';
-                        spanBadge.textContent = skill;
+                        spanBadge.textContent = textToDisplay;
                         skillsContainer.appendChild(spanBadge);
                     });
                 } else {
                     skillsContainer.innerHTML = `<span style="font-size:13px; color:var(--text-muted);">No technical skills identified.</span>`;
+                }
+
+                // 5. Job Card Recommendation Engine Rendering
+                const jobsContainer = document.getElementById('jobsContainer');
+                if (jobsContainer) {
+                    jobsContainer.innerHTML = '';
+                    const matchesList = data.jobMatches || [];
+                    if (matchesList.length > 0) {
+                        matchesList.forEach(match => {
+                            const card = document.createElement('div');
+                            card.className = 'job-card';
+                            card.innerHTML = `
+                                <div class="job-card-header">
+                                    <div>
+                                        <div class="job-title">${match.jobTitle}</div>
+                                        <div class="job-company">${match.companyName}</div>
+                                    </div>
+                                    <span class="job-meta-pill">${match.matchScore}% Match</span>
+                                </div>
+                                <div class="job-details-row">
+                                    <span>📍 ${match.jobLocation || 'Remote'}</span>
+                                    <span>💰 ${match.salaryRange || 'Not Specified'}</span>
+                                </div>
+                                <div class="skills-match-info">
+                                    <p style="color: #16a34a;"><strong>Matched Skills:</strong> ${match.matchedSkills || 'None'}</p>
+                                    <p style="color: #dc2626; margin-top: 3px;"><strong>Missing Requirements:</strong> ${match.missingSkills || 'None'}</p>
+                                </div>
+                            `;
+                            jobsContainer.appendChild(card);
+                        });
+                    } else {
+                        jobsContainer.innerHTML = `<p style="font-size:13px; color:var(--text-muted); text-align:center; padding: 20px 0;">No matching job openings found in database indexes right now.</p>`;
+                    }
                 }
 
             } catch (err) {

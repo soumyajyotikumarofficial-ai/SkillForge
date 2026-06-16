@@ -20,7 +20,10 @@ public class User
 public class Candidate
 {
     public int CandidateId { get; set; }
-    public int UserId { get; set; }
+    
+    // ✅ CHANGED: Made nullable to support anonymous/unauthenticated resume uploads without crashing FK checks
+    public int? UserId { get; set; } 
+    
     public string Name { get; set; } = "";
     public string Email { get; set; } = "";
     public string Phone { get; set; } = "";

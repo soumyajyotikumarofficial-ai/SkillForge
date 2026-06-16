@@ -1,13 +1,16 @@
+using System;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+using System.Collections.Generic;
+using System.Text.Json;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using SkillForge.Models;
 using SkillForge.API.Services;
 using SkillForge.Data;
-using SkillForge.Models;
-using SkillForge.DTOs;
-using System.Text.Json;
-using System.IO;
-using System.Text.Json.Serialization;
 
 namespace SkillForge.Controllers;
 
@@ -15,198 +18,91 @@ namespace SkillForge.Controllers;
 [Route("api/[controller]")]
 public class CandidateController : ControllerBase
 {
-    private readonly AIService _aiService;
     private readonly SkillForgeDbContext _dbContext;
+    private readonly AIService _aiService;
     private readonly ILogger<CandidateController> _logger;
 
-    public CandidateController(AIService aiService, SkillForgeDbContext dbContext, ILogger<CandidateController> logger)
+    public CandidateController(
+        SkillForgeDbContext dbContext, 
+        AIService aiService, 
+        ILogger<CandidateController> logger)
     {
-        _aiService = aiService;
         _dbContext = dbContext;
+        _aiService = aiService;
         _logger = logger;
     }
 
-    // ✅ FIXED: Route renamed from "analyze-resume" to "upload-resume" to match dashboard targets
     [HttpPost("upload-resume")]
-    [AllowAnonymous]  // ✅ Bypass token validation crashes during local testing
     public async Task<IActionResult> AnalyzeResume(IFormFile file)
     {
+        if (file == null || file.Length == 0)
+        {
+            _logger.LogWarning("Upload-resume endpoint hit with an empty or missing file.");
+            return BadRequest(new { error = "Please upload a valid resume file." });
+        }
+
+        _logger.LogInformation("Processing resume upload request: {FileName} ({Length} bytes)", file.FileName, file.Length);
+
+        var aiResultObject = await _aiService.ProcessAndAnalyzeResumeAsync(file);
+        if (aiResultObject == null)
+        {
+            _logger.LogError("AI Service processing completely failed or returned a null reference due to upstream API unavailability.");
+            return StatusCode(503, new { error = "The AI parsing service is currently experiencing high demand. Please try again in a few moments." });
+        }
+
         try
         {
-            if (file == null || file.Length == 0)
-                return BadRequest(new { error = "No file uploaded" });
+            var rawJson = JsonSerializer.Serialize(aiResultObject);
+            using var doc = JsonDocument.Parse(rawJson);
+            var root = doc.RootElement;
 
-            var allowedExtensions = new[] { ".pdf", ".docx", ".txt" };
-            var fileExtension = Path.GetExtension(file.FileName).ToLower();
-
-            if (!allowedExtensions.Contains(fileExtension))
-                return BadRequest(new { error = "Only PDF, DOCX, TXT allowed" });
-
-            string fileContent;
-            using (var stream = new MemoryStream())
+            if (root.TryGetProperty("error", out var errorProp))
             {
-                await file.CopyToAsync(stream);
-                stream.Position = 0;
-
-                fileContent = fileExtension switch
-                {
-                    ".pdf" => ExtractTextFromPdf(stream),
-                    ".docx" => ExtractTextFromDocx(stream),
-                    ".txt" => ExtractTextFromTxt(stream),
-                    _ => throw new InvalidOperationException("Unsupported file type")
-                };
+                _logger.LogWarning("AI Service structural internal error highlighted: {Error}", errorProp.GetString());
+                return BadRequest(new { error = errorProp.GetString() });
             }
-
-            if (string.IsNullOrWhiteSpace(fileContent))
-                return BadRequest(new { error = "Could not extract text from file" });
-
-            _logger.LogInformation("Resume text extracted: {Length} characters", fileContent.Length);
-
-            // Call AI Service to analyze
-            var result = await _aiService.AnalyzeResumeAsync(fileContent);
-
-            if (result == null)
-                return StatusCode(500, new { error = "Analysis failed" });
-
-            // Save to database after analysis
-            await SaveCandidateToDbAsync(result);
-
-            return Ok(result);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error analyzing resume");
-            return StatusCode(500, new { error = "Processing error", details = ex.Message });
-        }
-    }
-
-    [HttpPost("register")]
-    [AllowAnonymous] 
-    public async Task<IActionResult> Register([FromBody] JsonElement model)
-    {
-        try
-        {
-            _logger.LogInformation("Registration request received: {Data}", model.GetRawText());
-
-            string username = model.TryGetProperty("username", out var u) ? u.GetString() : null;
-            string email = model.TryGetProperty("email", out var e) ? e.GetString() : null;
-            string password = model.TryGetProperty("password", out var p) ? p.GetString() : null;
-            string role = model.TryGetProperty("role", out var r) ? r.GetString() : "Candidate";
-
-            if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password))
-            {
-                return BadRequest(new { error = "Username and password are required" });
-            }
-
-            return Ok(new { 
-                message = "Registration successful!", 
-                user = new { username, email, role } 
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error during registration handling");
-            return StatusCode(500, new { error = "Internal server registration error" });
-        }
-    }
-
-    [HttpPost("login")]
-    [AllowAnonymous] 
-    public async Task<IActionResult> Login([FromBody] JsonElement model)
-    {
-        try
-        {
-            _logger.LogInformation("Login request received: {Data}", model.GetRawText());
-
-            string username = model.TryGetProperty("username", out var u) ? u.GetString() : null;
-            string password = model.TryGetProperty("password", out var p) ? p.GetString() : null;
-
-            if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password))
-            {
-                return BadRequest(new { error = "Username and password are required" });
-            }
-
-            return Ok(new {
-                token = "mock-jwt-token-for-local-testing-purposes",
-                user = new {
-                    username = username,
-                    role = "Candidate",
-                    id = 1
-                }
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error during login processing");
-            return StatusCode(500, new { error = "Internal server login error" });
-        }
-    }
-
-    private async Task SaveCandidateToDbAsync(object analysisResult)
-    {
-        try
-        {
-            string jsonString = JsonSerializer.Serialize(analysisResult);
-            using var jsonDoc = JsonDocument.Parse(jsonString);
-            var root = jsonDoc.RootElement;
 
             if (!root.TryGetProperty("candidate", out var candidateObj))
             {
-                _logger.LogError("Candidate object missing from analysis result");
-                return;
+                _logger.LogError("Candidate object missing from analysis result payload hierarchy structures.");
+                return StatusCode(500, new { error = "Malformed analysis payload architecture returned by AI processing frameworks." });
             }
 
-            string name = ExtractJsonString(candidateObj, "name") ?? "Unknown";
-            string phone = ExtractJsonString(candidateObj, "phone") ?? "";
-            string email = ExtractJsonString(candidateObj, "email") ?? "";
-            string location = ExtractJsonString(candidateObj, "location") ?? "";
-            string qualification = ExtractJsonString(candidateObj, "highestQualification") ?? "";
-            string experience = ExtractJsonString(candidateObj, "yearsOfExperience") ?? "";
+            string name = candidateObj.GetProperty("name").GetString() ?? "";
+            string email = candidateObj.GetProperty("email").GetString() ?? "";
+            string phone = candidateObj.GetProperty("phone").GetString() ?? "";
+            string location = candidateObj.GetProperty("location").GetString() ?? "";
+            string qualification = candidateObj.GetProperty("highestQualification").GetString() ?? "";
+            string experience = candidateObj.GetProperty("yearsOfExperience").GetString() ?? "";
             
-            int score = 50;
-            if (root.TryGetProperty("score", out var scoreElement))
+            int score = root.TryGetProperty("score", out var scoreProp) ? scoreProp.GetInt32() : 0;
+            string summary = root.TryGetProperty("summary", out var summaryProp) ? summaryProp.GetString() ?? "" : "";
+
+            // Database lookup
+            var candidate = await _dbContext.Candidates
+                .Include(c => c.Skills)
+                .FirstOrDefaultAsync(c => c.Name == name && c.Phone == phone);
+
+            if (candidate != null)
             {
-                if (scoreElement.ValueKind == JsonValueKind.Number)
-                    score = scoreElement.GetInt32();
-            }
+                _logger.LogInformation("Updating existing candidate record ID: {Id}", candidate.CandidateId);
+                candidate.Email = email;
+                candidate.Location = location;
+                candidate.HighestQualification = qualification;
+                candidate.YearsOfExperience = experience;
+                candidate.ResumeScore = score;
+                candidate.Summary = summary;
+                candidate.UpdatedAt = DateTime.UtcNow;
 
-            string summary = ExtractJsonString(root, "summary") ?? "";
-
-            var skills = new List<string>();
-            if (root.TryGetProperty("skills", out var skillsArray) && skillsArray.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var skillElement in skillsArray.EnumerateArray())
-                {
-                    var skillText = skillElement.GetString();
-                    if (!string.IsNullOrWhiteSpace(skillText))
-                        skills.Add(skillText);
-                }
-            }
-
-            var existingCandidate = _dbContext.Candidates
-                .FirstOrDefault(c => c.Name == name && c.Phone == phone);
-
-            Candidate candidate;
-            if (existingCandidate != null)
-            {
-                _logger.LogInformation("Updating existing candidate: {Name}", name);
-                existingCandidate.Email = email;
-                existingCandidate.Location = location;
-                existingCandidate.HighestQualification = qualification;
-                existingCandidate.YearsOfExperience = experience;
-                existingCandidate.ResumeScore = score;
-                existingCandidate.Summary = summary;
-                existingCandidate.UpdatedAt = DateTime.UtcNow;
-
-                _dbContext.CandidateSkills.RemoveRange(existingCandidate.Skills);
-                candidate = existingCandidate;
+                _dbContext.CandidateSkills.RemoveRange(candidate.Skills);
+                candidate.Skills.Clear();
             }
             else
             {
-                _logger.LogInformation("Creating new candidate: {Name}", name);
+                _logger.LogInformation("Creating new candidate instance entry in database: {Name}", name);
                 candidate = new Candidate
                 {
-                    UserId = 0, 
+                    UserId = null,
                     Name = name,
                     Email = email,
                     Phone = phone,
@@ -221,237 +117,119 @@ public class CandidateController : ControllerBase
                 _dbContext.Candidates.Add(candidate);
             }
 
-            foreach (var skill in skills)
+            await _dbContext.SaveChangesAsync();
+
+            // Populate skills
+            if (root.TryGetProperty("skills", out var skillsArray))
             {
-                if (!string.IsNullOrWhiteSpace(skill))
+                foreach (var skillElement in skillsArray.EnumerateArray())
                 {
-                    candidate.Skills.Add(new CandidateSkill 
-                    { 
-                        SkillName = skill,
-                        Proficiency = 3 
-                    });
+                    string extractedSkillName = skillElement.GetString() ?? "";
+                    if (!string.IsNullOrWhiteSpace(extractedSkillName))
+                    {
+                        var cleanSkill = new CandidateSkill
+                        {
+                            CandidateId = candidate.CandidateId,
+                            SkillName = extractedSkillName.Trim(),
+                            Proficiency = 3
+                        };
+                        _dbContext.CandidateSkills.Add(cleanSkill);
+                    }
                 }
+                await _dbContext.SaveChangesAsync();
             }
 
-            await _dbContext.SaveChangesAsync();
-            _logger.LogInformation("✅ Candidate saved to DB: {CandidateId}", candidate.CandidateId);
+            // Match Engine Loop
+            var currentOpenJobs = await _dbContext.Jobs
+                .Include(j => j.RequiredSkills)
+                .ToListAsync();
 
-            await CalculateJobMatchesAsync(candidate);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "❌ Error saving candidate to database");
-        }
-    }
+            var candidateSkillNames = await _dbContext.CandidateSkills
+                .Where(s => s.CandidateId == candidate.CandidateId)
+                .Select(s => s.SkillName.ToLower().Trim())
+                .ToListAsync();
 
-    private string? ExtractJsonString(JsonElement element, string propertyName)
-    {
-        if (element.TryGetProperty(propertyName, out var prop))
-        {
-            return prop.ValueKind switch
+            foreach (var job in currentOpenJobs)
             {
-                JsonValueKind.String => prop.GetString(),
-                JsonValueKind.Null => null,
-                _ => prop.GetString() ?? null
-            };
-        }
-        return null;
-    }
+                var matches = job.RequiredSkills
+                    .Where(rs => candidateSkillNames.Any(cs => cs.Contains(rs.SkillName.ToLower().Trim()) || rs.SkillName.ToLower().Trim().Contains(cs)))
+                    .ToList();
 
-    private async Task CalculateJobMatchesAsync(Candidate candidate)
-    {
-        try
-        {
-            var jobs = _dbContext.Jobs.Include(j => j.RequiredSkills).ToList();
-            var candidateSkills = candidate.Skills.Select(s => s.SkillName.ToLower()).ToHashSet();
+                var missing = job.RequiredSkills.Except(matches).ToList();
 
-            foreach (var job in jobs)
-            {
-                var requiredSkills = job.RequiredSkills.Select(s => s.SkillName.ToLower()).ToList();
-                var matchedSkills = candidateSkills.Intersect(requiredSkills).ToList();
-                var missingSkills = requiredSkills.Except(matchedSkills).ToList();
-                
-                var matchScore = requiredSkills.Count > 0 ? (int)((matchedSkills.Count * 100) / requiredSkills.Count) : 0;
+                int calculatedMatchScore = job.RequiredSkills.Count > 0 
+                    ? (int)Math.Round((double)matches.Count / job.RequiredSkills.Count * 100) 
+                    : 0;
 
-                var existingMatch = _dbContext.JobMatches.FirstOrDefault(m => m.JobId == job.JobId && m.CandidateId == candidate.CandidateId);
-                
-                if (existingMatch != null)
+                string matchedSkillsCsv = string.Join(", ", matches.Select(m => m.SkillName));
+                string missingSkillsCsv = string.Join(", ", missing.Select(m => m.SkillName));
+
+                var existingMatchRecord = await _dbContext.JobMatches
+                    .FirstOrDefaultAsync(jm => jm.JobId == job.JobId && jm.CandidateId == candidate.CandidateId);
+
+                if (existingMatchRecord != null)
                 {
-                    existingMatch.MatchScore = matchScore;
-                    existingMatch.MatchedSkills = string.Join(", ", matchedSkills);
-                    existingMatch.MissingSkills = string.Join(", ", missingSkills);
+                    existingMatchRecord.MatchScore = calculatedMatchScore;
+                    existingMatchRecord.MatchedSkills = matchedSkillsCsv;
+                    existingMatchRecord.MissingSkills = missingSkillsCsv;
+                    existingMatchRecord.CreatedAt = DateTime.UtcNow;
                 }
-                else if (matchScore > 0)
+                else
                 {
-                    _dbContext.JobMatches.Add(new JobMatch
+                    var newJobMatchEntry = new JobMatch
                     {
                         JobId = job.JobId,
                         CandidateId = candidate.CandidateId,
-                        MatchScore = matchScore,
-                        MatchedSkills = string.Join(", ", matchedSkills),
-                        MissingSkills = string.Join(", ", missingSkills),
+                        MatchScore = calculatedMatchScore,
+                        MatchedSkills = matchedSkillsCsv,
+                        MissingSkills = missingSkillsCsv,
                         CreatedAt = DateTime.UtcNow
-                    });
+                    };
+                    _dbContext.JobMatches.Add(newJobMatchEntry);
                 }
             }
 
             await _dbContext.SaveChangesAsync();
-            _logger.LogInformation("✅ Job matches calculated for candidate: {CandidateId}", candidate.CandidateId);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error calculating job matches");
-        }
-    }
+            _logger.LogInformation("✅ Job evaluation calculation sequence finished for Candidate Tracking Key: {Id}", candidate.CandidateId);
 
-    private string ExtractTextFromPdf(MemoryStream stream)
-    {
-        try
-        {
-            var document = UglyToad.PdfPig.PdfDocument.Open(stream);
-            var text = string.Join("\n", document.GetPages().Select(p => p.Text));
-            _logger.LogInformation("PDF TEXT LENGTH: {Length}", text.Length);
-            System.IO.File.WriteAllText("extracted-pdf.txt", text);
-            return text;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "PDF extraction failed");
-            throw;
-        }
-    }
-
-    private string ExtractTextFromDocx(MemoryStream stream)
-    {
-        try
-        {
-            var text = new System.Text.StringBuilder();
-            using (var archive = new System.IO.Compression.ZipArchive(stream, System.IO.Compression.ZipArchiveMode.Read))
-            {
-                var xmlPart = archive.Entries.FirstOrDefault(e => e.FullName == "word/document.xml");
-                if (xmlPart == null)
-                    throw new InvalidOperationException("Invalid DOCX file");
-
-                using (var entryStream = xmlPart.Open())
-                using (var reader = new StreamReader(entryStream))
+            // Build explicit payload mapped to the structure of candidate-dashboard.html JavaScript
+            var safePayload = await _dbContext.Candidates
+                .Where(c => c.CandidateId == candidate.CandidateId)
+                .Select(c => new
                 {
-                    var xmlContent = reader.ReadToEnd();
-                    var doc = new System.Xml.XmlDocument();
-                    doc.LoadXml(xmlContent);
-
-                    var textNodes = doc.GetElementsByTagName("w:t");
-                    foreach (System.Xml.XmlElement node in textNodes)
-                        text.Append(node.InnerText);
-                }
-            }
-            var result = text.ToString();
-            _logger.LogInformation("DOCX extracted: {Length} characters", result.Length);
-            return result;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "DOCX extraction failed");
-            throw;
-        }
-    }
-
-    private string ExtractTextFromTxt(MemoryStream stream)
-    {
-        try
-        {
-            stream.Position = 0;
-            using (var reader = new StreamReader(stream))
-            {
-                var text = reader.ReadToEnd();
-                _logger.LogInformation("TXT extracted: {Length} characters", text.Length);
-                return text;
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "TXT extraction failed");
-            throw;
-        }
-    }
-
-    [HttpGet("{id}")]
-    [Authorize]
-    public async Task<IActionResult> GetCandidate(int id)
-    {
-        try
-        {
-            var candidate = await _dbContext.Candidates
-                .Include(c => c.Skills)
-                .FirstOrDefaultAsync(c => c.CandidateId == id);
-
-            if (candidate == null)
-                return NotFound(new { error = "Candidate not found" });
-
-            return Ok(candidate);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting candidate");
-            return StatusCode(500, new { error = ex.Message });
-        }
-    }
-
-    [HttpGet("all")]
-    [Authorize(Roles = "Recruiter")]
-    public async Task<IActionResult> GetAllCandidates()
-    {
-        try
-        {
-            var candidates = await _dbContext.Candidates
-                .Include(c => c.Skills)
-                .OrderByDescending(c => c.ResumeScore)
-                .ToListAsync();
-
-            return Ok(candidates);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting candidates");
-            return StatusCode(500, new { error = ex.Message });
-        }
-    }
-
-    [HttpGet("{candidateId}/job-matches")]
-    [AllowAnonymous]  
-    public async Task<IActionResult> GetJobMatches(int candidateId)
-    {
-        try
-        {
-            var matches = await _dbContext.JobMatches
-                .Where(m => m.CandidateId == candidateId)
-                .Select(m => new
-                {
-                    m.MatchId,
-                    m.JobId,
-                    m.CandidateId,
-                    m.MatchScore,
-                    m.MatchedSkills,
-                    m.MissingSkills,
-                    m.CreatedAt,
-                    job = new
+                    score = c.ResumeScore,
+                    summary = c.Summary,
+                    candidate = new
                     {
-                        m.Job.JobId,
-                        m.Job.Title,
-                        m.Job.Description,
-                        m.Job.CompanyName,
-                        m.Job.Location,
-                        m.Job.SalaryRange
-                    }
+                        name = c.Name,
+                        email = c.Email,
+                        phone = c.Phone,
+                        location = c.Location,
+                        highestQualification = c.HighestQualification,
+                        yearsOfExperience = c.YearsOfExperience
+                    },
+                    // FIX: Maps database complex skills entities directly to a clean array of string objects
+                    skills = c.Skills.Select(s => s.SkillName).ToList(),
+                    jobMatches = c.JobMatches.Select(jm => new
+                    {
+                        matchId = jm.MatchId,
+                        matchScore = jm.MatchScore,
+                        matchedSkills = jm.MatchedSkills,
+                        missingSkills = jm.MissingSkills,
+                        jobTitle = jm.Job.Title,
+                        companyName = jm.Job.CompanyName,
+                        jobLocation = jm.Job.Location,
+                        salaryRange = jm.Job.SalaryRange
+                    }).OrderByDescending(jm => jm.matchScore).ToList()
                 })
-                .OrderByDescending(m => m.MatchScore)
-                .ToListAsync();
+                .FirstOrDefaultAsync();
 
-            return Ok(matches);
+            return Ok(safePayload);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error getting job matches");
-            return StatusCode(500, new { error = ex.Message });
+            _logger.LogError(ex, "Fatal failure parsing and mapping system entities on resume ingestion pipelines.");
+            return StatusCode(500, new { error = "Internal controller parsing error occurred.", details = ex.Message });
         }
     }
 }
