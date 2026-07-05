@@ -59,7 +59,7 @@ namespace SkillForge.API.Migrations
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT");
 
-                    b.Property<int?>("UserId")
+                    b.Property<int>("UserId")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("YearsOfExperience")
@@ -425,7 +425,8 @@ namespace SkillForge.API.Migrations
                     b.HasOne("SkillForge.Models.User", "User")
                         .WithMany("Candidates")
                         .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade);
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
 
                     b.Navigation("User");
                 });

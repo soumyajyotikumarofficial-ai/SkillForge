@@ -72,19 +72,24 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.UseHttpsRedirection();
+// FIX: Disabled to prevent HTTP 307 redirects from breaking local CORS preflight OPTIONS handshakes
+// app.UseHttpsRedirection();
 
-// UseCors must pre-load prior to processing routing contexts
-app.UseCors("AllowFrontend");
-
-// Explicitly register endpoint resolution matrices early
+// ===== APPLICATION MIDDLEWARE EXECUTION PIPELINE =====
+// 1. Establish the endpoint routing map
 app.UseRouting();
 
+// 2. Apply CORS policy directly onto the routing endpoints
+app.UseCors("AllowFrontend");
+
+// 3. Authenticate and authorize the context
 app.UseAuthentication();
 app.UseAuthorization();
 
+// 4. Map the API endpoints to their controllers
 app.MapControllers();
 
+// ===== DATABASE SEED & ASSURANCE INITIALIZATION =====
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<SkillForgeDbContext>();

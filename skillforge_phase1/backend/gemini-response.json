@@ -4,7 +4,7 @@
       "content": {
         "parts": [
           {
-            "text": "{\n  \"candidate\": {\n    \"name\": \"Soumyajyoti Kumar\",\n    \"email\": \"soumyajyotikumarofficial@gmail.com\",\n    \"phone\": \"+918335987516\",\n    \"location\": \"Chinsurah, Hooghly\",\n    \"highestQualification\": \"Bachelor of Technology in Electrical Engineering\",\n    \"yearsOfExperience\": \"3.5+ years\"\n  },\n  \"skills\": [\n    \"C# (.NET8)\",\n    \"Python\",\n    \"SQL (T-SQL, MSSQL Server)\",\n    \"HTML/CSS\",\n    \"JavaScript\",\n    \"ASP.NET Core\",\n    \"CQRS Pattern\",\n    \"Microservices\",\n    \"RESTful APIs\",\n    \"Entity Framework Core\",\n    \"MSSQL Server\",\n    \"Oracle\",\n    \"Query Optimization\",\n    \"PARTITION\",\n    \"PIVOT\",\n    \"Window Functions\",\n    \"LLMs (Ollama/Phi-3)\",\n    \"NLP\",\n    \"Predictive Modeling\",\n    \"Scikit-learn\",\n    \"FastAPI\",\n    \"PowerBI\",\n    \"Azure DevOps\",\n    \"Docker\",\n    \"RabbitMQ\",\n    \"Hangfire\",\n    \"CI/CD Pipelines\",\n    \"xUnit\",\n    \"Moq\",\n    \"Unit Testing\",\n    \"Integration Testing\"\n  ],\n  \"score\": 90,\n  \"summary\": \"A highly skilled System Engineer with 3.5+ years of experience in delivering enterprise-grade .NET solutions, specializing in backend architecture, CQRS patterns, and microservices. Possessing demonstrated expertise in managing distributed offshore teams and a strong passion for AI/ML, including Generative AI and LLMs, applied through personal projects and professional competency.\"\n}"
+            "text": "{\"candidate\":{\"name\":\"Soumyajyoti Kumar\",\"email\":\"soumyajyoti@example.com\",\"phone\":\"+91 9876543210\",\"location\":\"Kolkata, West Bengal\",\"highestQualification\":\"Bachelor of Technology (B.Tech) in Computer Science\",\"yearsOfExperience\":\"3 years\"},\"skills\":[\"C#\",\"ASP.NET Core\",\".NET 8\",\"Entity Framework Core\",\"SQL Server\",\"Azure\",\"Azure DevOps\",\"REST API Development\",\"Git\",\"JavaScript\",\"TypeScript\",\"Angular\",\"HTML\",\"CSS\",\"LINQ\",\"Unit Testing\",\"Microsoft Azure Developer Associate (AZ-204)\",\"Power BI Fundamentals\"],\"score\":90,\"summary\":\"A results-driven .NET Developer with 3 years of experience, Soumyajyoti specializes in designing, developing, and maintaining enterprise web applications. Proficient in ASP.NET Core, SQL Server, and Azure, he focuses on backend development, database management, and cloud technologies with an emphasis on performance and scalability.\"}"
           }
         ],
         "role": "model"
@@ -14,18 +14,18 @@
     }
   ],
   "usageMetadata": {
-    "promptTokenCount": 1597,
-    "candidatesTokenCount": 410,
-    "totalTokenCount": 3189,
+    "promptTokenCount": 821,
+    "candidatesTokenCount": 211,
+    "totalTokenCount": 1719,
     "promptTokensDetails": [
       {
         "modality": "TEXT",
-        "tokenCount": 1597
+        "tokenCount": 821
       }
     ],
-    "thoughtsTokenCount": 1182,
+    "thoughtsTokenCount": 687,
     "serviceTier": "standard"
   },
   "modelVersion": "gemini-2.5-flash",
-  "responseId": "cT0watY64re-vQ_tgqTIBg"
+  "responseId": "IxlKaviiEM_UqfkPhPvKoAg"
 }
