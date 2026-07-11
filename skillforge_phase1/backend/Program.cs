@@ -89,19 +89,27 @@ app.UseAuthorization();
 // 4. Map the API endpoints to their controllers
 app.MapControllers();
 
-// ===== DATABASE SEED & ASSURANCE INITIALIZATION =====
+// ===== DATABASE SEED & ASSURANCE INITIALIZATION WITH STARTUP SYNC =====
 using (var scope = app.Services.CreateScope())
 {
-    var db = scope.ServiceProvider.GetRequiredService<SkillForgeDbContext>();
-    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+    var services = scope.ServiceProvider;
+    var db = services.GetRequiredService<SkillForgeDbContext>();
+    var logger = services.GetRequiredService<ILogger<Program>>();
+    
     try
     {
+        // 1. Ensure DB exists
         db.Database.EnsureCreated();
         logger.LogInformation("✅ Database initialized successfully");
+
+        // 2. Automatically trigger JSearch sync immediately on boot
+        logger.LogInformation("🚀 [STARTUP] Bootstrapping live JSearch synchronization pipeline...");
+        var aiService = services.GetRequiredService<AIService>();
+        await aiService.RefreshLiveJobBankAsync();
     }
     catch (Exception ex)
     {
-        logger.LogError(ex, "❌ Database initialization error");
+        logger.LogError(ex, "❌ [STARTUP] Initialization lifecycle critical failure encountered");
     }
 }
 

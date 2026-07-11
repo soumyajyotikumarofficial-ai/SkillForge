@@ -40,7 +40,7 @@
         
         /* Drag and Drop Zone */
         .upload-container { border: 2px dashed #cbd5e1; padding: 50px 20px; border-radius: 12px; text-align: center; background: #fdfdfd; cursor: pointer; transition: all 0.2s ease; margin-bottom: 24px; }
-        .upload-container:hover { border-color: var(--primary); background: #f5f3ff; }
+        .upload-container:hover, .upload-container.dragover { border-color: var(--primary); background: #f5f3ff; }
         .upload-container input[type="file"] { display: none; }
         .upload-icon { font-size: 44px; margin-bottom: 12px; }
         .file-info { margin-top: 14px; font-size: 14px; color: var(--primary); font-weight: 600; }
@@ -83,7 +83,7 @@
         .skill-badge { background: #eef2ff; color: var(--primary); padding: 6px 14px; border-radius: 9999px; font-size: 13px; font-weight: 600; border: 1px solid #e0e7ff; transition: all 0.2s; }
         .skill-badge:hover { transform: translateY(-1px); background: #e0e7ff; box-shadow: 0 2px 4px rgba(79, 70, 229, 0.1); }
 
-        /* NEW: Job Cards Styles */
+        /* Job Cards Styles */
         .jobs-list { display: flex; flex-direction: column; gap: 16px; margin-top: 12px; }
         .job-card { border: 1px solid var(--border); background: #fff; padding: 20px; border-radius: 12px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.02); transition: transform 0.2s, box-shadow 0.2s; }
         .job-card:hover { transform: translateY(-2px); box-shadow: 0 6px 12px rgba(0,0,0,0.05); }
@@ -125,7 +125,7 @@
         <div class="content-grid">
             <div class="panel">
                 <h3>Resume Upload</h3>
-                <div class="upload-container" onclick="document.getElementById('resumeInput').click()">
+                <div id="dropZone" class="upload-container" onclick="document.getElementById('resumeInput').click()">
                     <div class="upload-icon">📬</div>
                     <p style="color: var(--text-dark); font-weight: 600; font-size: 15px;">Choose file or drag here</p>
                     <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Supports PDF, DOCX, TXT</p>
@@ -177,14 +177,12 @@
 
                     <div class="info-section">
                         <div class="section-header">🛠️ Technical Skills Core Matrix</div>
-                        <div id="skillsContainer" class="skills-grid">
-                            </div>
+                        <div id="skillsContainer" class="skills-grid"></div>
                     </div>
 
                     <div class="info-section">
                         <div class="section-header">💼 Real-Time Targeted Job Matches</div>
-                        <div id="jobsContainer" class="jobs-list">
-                            </div>
+                        <div id="jobsContainer" class="jobs-list"></div>
                     </div>
                 </div>
             </div>
@@ -208,7 +206,40 @@
 
             document.getElementById('navUsername').textContent = username;
             document.getElementById('welcomeName').textContent = username;
+
+            initDragAndDrop();
         });
+
+        function initDragAndDrop() {
+            const dropZone = document.getElementById('dropZone');
+            const fileInput = document.getElementById('resumeInput');
+
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dropZone.addEventListener(eventName, (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    dropZone.classList.add('dragover');
+                }, false);
+            });
+
+            ['dragleave', 'drop'].forEach(eventName => {
+                dropZone.addEventListener(eventName, (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    dropZone.classList.remove('dragover');
+                }, false);
+            });
+
+            dropZone.addEventListener('drop', (e) => {
+                const dt = e.dataTransfer;
+                const files = dt.files;
+
+                if (files && files.length > 0) {
+                    fileInput.files = files; 
+                    handleFileSelection(fileInput);
+                }
+            }, false);
+        }
 
         function handleFileSelection(input) {
             if (input.files && input.files[0]) {
@@ -239,6 +270,7 @@
 
             let responseSuccess = false;
             let outputText = "";
+            const token = localStorage.getItem('token');
 
             for (let i = 0; i < BACKEND_PORTS.length; i++) {
                 try {
@@ -249,6 +281,9 @@
 
                     const response = await fetch(targetEndpoint, {
                         method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${token}`
+                        },
                         body: formData
                     });
 
@@ -279,14 +314,14 @@
             try {
                 const data = JSON.parse(rawData);
                 
-                // 1. DYNAMIC FILLING SCORE COMPONENT
+                // 1. Dynamic Score Rendering
                 const targetScore = Math.min(Math.max(parseInt(data.score || data.Score) || 0, 0), 100); 
                 document.getElementById('scoreNumber').textContent = targetScore;
                 
                 const scoreRing = document.getElementById('scoreRing');
-                scoreRing.style.background = `conic-gradient(var(--success) 0% ${targetScore}%, #cbd5e1 ${targetScore}% 100%)`;
+                scoreRing.style.background = `conic-gradient(var(--success) 0% ${targetScore}%, #e2e8f0 ${targetScore}% 100%)`;
 
-                // 2. Parse Profile Identity Values
+                // 2. Profile Identity Details
                 const candidate = data.candidate || data.Candidate || {};
                 document.getElementById('candidateName').textContent = candidate.name || candidate.Name || "Unknown Professional";
                 document.getElementById('candidateEmail').textContent = candidate.email || candidate.Email || "N/A";
@@ -294,10 +329,10 @@
                 document.getElementById('candidateLocation').textContent = candidate.location || candidate.Location || "N/A";
                 document.getElementById('candidateEducation').textContent = candidate.highestQualification || candidate.HighestQualification || "Not Specified";
 
-                // 3. Render Profile Summarization Block
+                // 3. AI Executive Summary Block
                 document.getElementById('analysisSummary').textContent = data.summary || data.Summary || "No executive text breakdown recorded by the AI module engine.";
 
-                // 4. Generate dynamic skill profile mapping badges
+                // 4. Capabilities / Skill Badges
                 const skillsContainer = document.getElementById('skillsContainer');
                 skillsContainer.innerHTML = ''; 
 
@@ -313,23 +348,26 @@
                     skillsContainer.innerHTML = `<span style="font-size:13px; color:var(--text-muted);">No technical skills identified.</span>`;
                 }
 
-                // 5. NEW: RENDER JOB MATCHES CONTAINER 
+                // 5. Job Feed List Processing (With Live Action Button Support)
                 const jobsContainer = document.getElementById('jobsContainer');
                 jobsContainer.innerHTML = '';
 
                 const matchesList = data.jobMatches || data.JobMatches || [];
                 if (matchesList.length > 0) {
                     matchesList.forEach(match => {
-                        // Support both camelCase and PascalCase variations automatically
                         const score = match.matchScore ?? match.MatchScore ?? 0;
                         const title = match.jobTitle ?? match.JobTitle ?? 'Job Position';
                         const company = match.companyName ?? match.CompanyName ?? 'Confidential Employer';
                         const loc = match.jobLocation ?? match.JobLocation ?? 'Remote / Global';
                         const salary = match.salaryRange ?? match.SalaryRange ?? 'Competitive';
-                        const matchedSkills = match.matchedSkills ?? match.MatchedSkills ?? 'None';
-                        const missingSkills = match.missingSkills ?? match.MissingSkills ?? 'None';
+                        
+                        // Parse external application URL mapping safely from the JSearch integration payload
+                        const applyUrl = match.applyUrl || match.ApplyUrl || match.jobLink || match.JobLink || '#';
 
-                        // Decide badge color context
+                        const formatSkillsList = (val) => Array.isArray(val) ? val.join(', ') : (val || 'None');
+                        const matchedSkills = formatSkillsList(match.matchedSkills ?? match.MatchedSkills);
+                        const missingSkills = formatSkillsList(match.missingSkills ?? match.MissingSkills);
+
                         let badgeClass = 'match-low';
                         if (score >= 70) badgeClass = 'match-high';
                         else if (score >= 40) badgeClass = 'match-mid';
@@ -353,6 +391,12 @@
                             <div class="job-skills-tracking">
                                 <div class="skills-line"><span class="txt-success">✓ Matched:</span> ${matchedSkills}</div>
                                 <div class="skills-line"><span class="txt-danger">✗ Missing:</span> ${missingSkills}</div>
+                            </div>
+                            <div style="display: flex; justify-content: flex-end; margin-top: 8px; border-top: 1px dashed var(--border); padding-top: 14px;">
+                                <a href="${applyUrl}" target="_blank" rel="noopener noreferrer" 
+                                   style="background: var(--primary); color: white; text-decoration: none; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; transition: background 0.2s; display: inline-flex; align-items: center; gap: 4px;">
+                                    Apply Now ↗
+                                </a>
                             </div>
                         `;
                         jobsContainer.appendChild(cardElement);

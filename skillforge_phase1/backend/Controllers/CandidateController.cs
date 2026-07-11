@@ -4,10 +4,12 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Text.Json;
+using System.Net.Http;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Configuration;
 using SkillForge.Models;
 using SkillForge.API.Services;
 using SkillForge.Data;
@@ -21,15 +23,19 @@ public class CandidateController : ControllerBase
     private readonly SkillForgeDbContext _dbContext;
     private readonly AIService _aiService;
     private readonly ILogger<CandidateController> _logger;
+    private readonly IConfiguration _configuration;
+    private static readonly HttpClient _httpClient = new HttpClient();
 
     public CandidateController(
         SkillForgeDbContext dbContext, 
         AIService aiService, 
-        ILogger<CandidateController> logger)
+        ILogger<CandidateController> logger,
+        IConfiguration configuration)
     {
         _dbContext = dbContext;
         _aiService = aiService;
         _logger = logger;
+        _configuration = configuration;
     }
 
     [HttpPost("upload-resume")]
@@ -42,43 +48,28 @@ public class CandidateController : ControllerBase
         }
 
         _logger.LogInformation("Processing resume upload request: {FileName} ({Length} bytes)", file.FileName, file.Length);
-
-        var aiResultObject = await _aiService.ProcessAndAnalyzeResumeAsync(file);
-        if (aiResultObject == null)
+        
+        // 1. Invoke the service and receive the strongly-typed analysis object directly
+        var analysisResult = await _aiService.ProcessAndAnalyzeResumeAsync(file);
+        
+        if (analysisResult == null || analysisResult.Candidate == null)
         {
-            _logger.LogError("AI Service processing completely failed or returned a null reference.");
-            return StatusCode(503, new { error = "The AI parsing service is currently experiencing high demand. Please try again." });
+            _logger.LogError("AI Service processing completely failed or returned a null candidate hierarchy.");
+            return StatusCode(503, new { error = "The AI parsing service is currently experiencing high demand or failed to parse the profile layout. Please try again." });
         }
 
         try
         {
-            var rawJson = JsonSerializer.Serialize(aiResultObject);
-            using var doc = JsonDocument.Parse(rawJson);
-            var root = doc.RootElement;
+            // 2. Map structural values directly without round-trip JSON parsing reflection tricks
+            string name = analysisResult.Candidate.Name ?? "";
+            string email = analysisResult.Candidate.Email ?? "";
+            string phone = analysisResult.Candidate.Phone ?? "";
+            string location = analysisResult.Candidate.Location ?? "";
+            string qualification = analysisResult.Candidate.HighestQualification ?? "";
+            string experience = analysisResult.Candidate.YearsOfExperience ?? "";
+            int score = analysisResult.Score;
+            string summary = analysisResult.Summary ?? "";
 
-            if (root.TryGetProperty("error", out var errorProp))
-            {
-                _logger.LogWarning("AI Service structural internal error highlighted: {Error}", errorProp.GetString());
-                return BadRequest(new { error = errorProp.GetString() });
-            }
-
-            if (!root.TryGetProperty("candidate", out var candidateObj))
-            {
-                _logger.LogError("Candidate object missing from analysis result payload hierarchy structures.");
-                return StatusCode(500, new { error = "Malformed analysis payload architecture returned by AI processing frameworks." });
-            }
-
-            string name = candidateObj.GetProperty("name").GetString() ?? "";
-            string email = candidateObj.GetProperty("email").GetString() ?? "";
-            string phone = candidateObj.GetProperty("phone").GetString() ?? "";
-            string location = candidateObj.GetProperty("location").GetString() ?? "";
-            string qualification = candidateObj.GetProperty("highestQualification").GetString() ?? "";
-            string experience = candidateObj.GetProperty("yearsOfExperience").GetString() ?? "";
-            
-            int score = root.TryGetProperty("score", out var scoreProp) ? scoreProp.GetInt32() : 0;
-            string summary = root.TryGetProperty("summary", out var summaryProp) ? summaryProp.GetString() ?? "" : "";
-
-            // Database lookup
             var candidate = await _dbContext.Candidates
                 .Include(c => c.Skills)
                 .FirstOrDefaultAsync(c => c.Name == name && c.Phone == phone);
@@ -119,13 +110,12 @@ public class CandidateController : ControllerBase
 
             await _dbContext.SaveChangesAsync();
 
-            // Populate skills and track locally in lowercase for our matching logic execution matrix
+            // 3. Process skills directly out of the strongly-typed array collection
             var localSkillNames = new List<string>();
-            if (root.TryGetProperty("skills", out var skillsArray))
+            if (analysisResult.Skills != null && analysisResult.Skills.Any())
             {
-                foreach (var skillElement in skillsArray.EnumerateArray())
+                foreach (var extractedSkillName in analysisResult.Skills)
                 {
-                    string extractedSkillName = skillElement.GetString() ?? "";
                     if (!string.IsNullOrWhiteSpace(extractedSkillName))
                     {
                         string cleanName = extractedSkillName.Trim();
@@ -143,47 +133,33 @@ public class CandidateController : ControllerBase
                 await _dbContext.SaveChangesAsync();
             }
 
-            // ====================================================================
-            // PERFORMANCE FIX: BATCH LOAD EXISTING MATCHES TO PREVENT N+1 EXTRA SELECTS
-            // ====================================================================
-            var currentOpenJobs = await _dbContext.Jobs
-                .Include(j => j.RequiredSkills)
-                .ToListAsync();
-
+            var currentOpenJobs = await _dbContext.Jobs.ToListAsync();
             var existingMatchDictionary = await _dbContext.JobMatches
                 .Where(jm => jm.CandidateId == candidate.CandidateId)
                 .ToDictionaryAsync(jm => jm.JobId);
 
-            _logger.LogInformation("==================================================");
-            _logger.LogInformation("DEBUG ENGINE [JOBS COUNT]: {JobCount} rows pulled from DB.", currentOpenJobs.Count);
-            _logger.LogInformation("DEBUG ENGINE [PARSED SKILLS]: {Skills}", string.Join(", ", localSkillNames));
-            _logger.LogInformation("==================================================");
-
             foreach (var job in currentOpenJobs)
             {
-                var matches = job.RequiredSkills
-                    .Where(rs => {
-                        var dbSkillClean = rs.SkillName.ToLower().Trim();
-                        return localSkillNames.Any(cs => cs.Contains(dbSkillClean) || dbSkillClean.Contains(cs));
-                    })
+                var requiredSkills = ParseJobSkillsText(job.Description, job.Title);
+                var matched = localSkillNames
+                    .Intersect(requiredSkills.Select(s => s.ToLower()), StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                var missing = requiredSkills
+                    .Where(s => !localSkillNames.Contains(s.ToLower()))
                     .ToList();
 
-                var missing = job.RequiredSkills.Except(matches).ToList();
-
-                int calculatedMatchScore = job.RequiredSkills.Count > 0 
-                    ? (int)Math.Round((double)matches.Count / job.RequiredSkills.Count * 100) 
+                int calculatedMatchScore = requiredSkills.Count > 0 
+                    ? (int)Math.Round((double)matched.Count / requiredSkills.Count * 100) 
                     : 0;
 
-                // Baseline fallback protection block
                 if (calculatedMatchScore == 0 && (job.Title.ToLower().Contains("developer") || job.Title.ToLower().Contains("engineer") || job.Title.ToLower().Contains("analyst")))
                 {
-                    calculatedMatchScore = 35; 
+                    calculatedMatchScore = 45;
                 }
 
-                string matchedSkillsCsv = matches.Any() ? string.Join(", ", matches.Select(m => m.SkillName)) : "None";
-                string missingSkillsCsv = missing.Any() ? string.Join(", ", missing.Select(m => m.SkillName)) : "None";
+                string matchedSkillsCsv = matched.Any() ? string.Join(", ", matched).ToUpper() : "NONE";
+                string missingSkillsCsv = missing.Any() ? string.Join(", ", missing).ToUpper() : "NONE";
 
-                // Read directly from the in-memory dictionary rather than making a database trip
                 if (existingMatchDictionary.TryGetValue(job.JobId, out var existingMatchRecord))
                 {
                     existingMatchRecord.MatchScore = calculatedMatchScore;
@@ -207,60 +183,149 @@ public class CandidateController : ControllerBase
             }
 
             await _dbContext.SaveChangesAsync();
-            _logger.LogInformation("✅ Job evaluation calculation sequence finished for Candidate Tracking Key: {Id}", candidate.CandidateId);
 
-            // ====================================================================
-            // PROJECTION FIX: EXPLICIT DICTIONARY TO SUPPORT ALL UI CASING MODELS
-            // ====================================================================
-            var finalCandidateData = await _dbContext.Candidates
-                .Include(c => c.Skills)
-                .Include(c => c.JobMatches)
-                    .ThenInclude(jm => jm.Job)
-                .Where(c => c.CandidateId == candidate.CandidateId)
-                .FirstOrDefaultAsync();
+            var matchesUpdated = await _dbContext.JobMatches
+                .Where(jm => jm.CandidateId == candidate.CandidateId)
+                .ToListAsync();
 
-            if (finalCandidateData == null)
+            var allMatchedJobs = currentOpenJobs.Select(job => {
+                var matchRecord = matchesUpdated.FirstOrDefault(m => m.JobId == job.JobId);
+                int currentScore = matchRecord?.MatchScore ?? 35;
+         
+                string explanation = "Low match. Noticeable alignment variations relative to the target tool framework configuration details.";
+                if (currentScore >= 80) explanation = "Excellent match! Strong alignment with your core technical expertise, satisfying critical requirements.";
+                else if (currentScore >= 40) {
+                    var parts = (matchRecord?.MissingSkills ?? "NONE").Split(", ");
+                    explanation = $"Good match. Solid foundational architecture profile alignment, but you need to bridge the gap regarding: {parts.FirstOrDefault()}.";
+                }
+
+                return new Dictionary<string, object> {
+                    { "matchScore", currentScore },
+                    { "matchedSkills", matchRecord?.MatchedSkills ?? "NONE" },
+                    { "missingSkills", matchRecord?.MissingSkills ?? "NONE" },
+                    { "jobTitle", job.Title },
+                    { "companyName", job.CompanyName },
+                    { "jobLocation", job.Location },
+                    { "salaryRange", job.SalaryRange },
+                    { "applyUrl", job.ApplyUrl ?? "https://linkedin.com" },
+                    { "explanation", explanation },
+                    { "MatchScore", currentScore },
+                    { "MatchedSkills", matchRecord?.MatchedSkills ?? "NONE" },
+                    { "MissingSkills", matchRecord?.MissingSkills ?? "NONE" },
+                    { "JobTitle", job.Title },
+                    { "CompanyName", job.CompanyName },
+                    { "JobLocation", job.Location },
+                    { "SalaryRange", job.SalaryRange },
+                    { "ApplyUrl", job.ApplyUrl ?? "https://linkedin.com" },
+                    { "Explanation", explanation }
+                };
+            }).OrderByDescending(jm => (int)jm["matchScore"]).ToList();
+
+            var liveJobMatches = new List<Dictionary<string, object>>();
+            try
             {
-                return NotFound(new { error = "Candidate profile context tracking lost." });
+                string apiKey = _configuration["RapidAPI:Key"];
+                if (!string.IsNullOrEmpty(apiKey))
+                {
+                    string primaryQuerySkill = localSkillNames.FirstOrDefault() ?? ".NET Developer";
+                    
+                    var request = new HttpRequestMessage
+                    {
+                        Method = HttpMethod.Get,
+                        RequestUri = new Uri($"https://jsearch.p.rapidapi.com/search-v2?query={Uri.EscapeDataString(primaryQuerySkill)}&page=1&num_pages=1"),
+                        Headers =
+                        {
+                            { "x-rapidapi-key", apiKey },
+                            { "x-rapidapi-host", "jsearch.p.rapidapi.com" },
+                        },
+                    };
+
+                    using var apiResponse = await _httpClient.SendAsync(request);
+                    if (apiResponse.IsSuccessStatusCode)
+                    {
+                        var jsonString = await apiResponse.Content.ReadAsStringAsync();
+                        _logger.LogInformation("=== RAW JSEARCH API RESPONSE (FROM CONTROLLER) ===\n{Response}", jsonString);
+                        using var apiDoc = JsonDocument.Parse(jsonString);
+                        
+                        // Defensive Parsing: Look for both "data" and "results" structural arrays reactively
+                        JsonElement resultsArray;
+                        bool foundArray = false;
+
+                        if (apiDoc.RootElement.TryGetProperty("data", out resultsArray) && resultsArray.ValueKind == JsonValueKind.Array)
+                        {
+                            foundArray = true;
+                        }
+                        else if (apiDoc.RootElement.TryGetProperty("results", out resultsArray) && resultsArray.ValueKind == JsonValueKind.Array)
+                        {
+                            foundArray = true;
+                        }
+
+                        if (foundArray)
+                        {
+                            int count = 0;
+                            foreach (var job in resultsArray.EnumerateArray())
+                            {
+                                if (count >= 5) break;
+                                string title = (job.TryGetProperty("job_title", out var titleProp) ? titleProp.GetString() : null) ?? (job.TryGetProperty("title", out var t2) ? t2.GetString() : null) ?? "Job Position";
+                                string company = (job.TryGetProperty("employer_name", out var compProp) ? compProp.GetString() : null) ?? (job.TryGetProperty("company_name", out var c2) ? c2.GetString() : null) ?? "Unknown Employer";
+                                string loc = job.TryGetProperty("job_city", out var cityProp) ? cityProp.GetString() : "Remote / Global";
+                                string applyUrl = (job.TryGetProperty("job_apply_link", out var urlProp) ? urlProp.GetString() : null) ?? (job.TryGetProperty("apply_url", out var u2) ? u2.GetString() : null) ?? "#";
+                                
+                                int dynamicLiveScore = 95 - (count * 5);
+                                string matchedCsv = primaryQuerySkill.ToUpper();
+
+                                liveJobMatches.Add(new Dictionary<string, object> {
+                                    { "matchScore", dynamicLiveScore },
+                                    { "matchedSkills", matchedCsv },
+                                    { "missingSkills", "NONE" },
+                                    { "jobTitle", title },
+                                    { "companyName", company },
+                                    { "jobLocation", loc },
+                                    { "salaryRange", "Market Rate (Live)" },
+                                    { "applyUrl", applyUrl },
+                                    { "explanation", "Live position correlated via JSearch API." },
+                                    { "MatchScore", dynamicLiveScore },
+                                    { "MatchedSkills", matchedCsv },
+                                    { "MissingSkills", "NONE" },
+                                    { "JobTitle", title },
+                                    { "CompanyName", company },
+                                    { "JobLocation", loc },
+                                    { "SalaryRange", "Market Rate (Live)" },
+                                    { "ApplyUrl", applyUrl },
+                                    { "Explanation", "Live position correlated via JSearch API." }
+                                });
+                                count++;
+                            }
+                        }
+                        else
+                        {
+                            _logger.LogWarning("⚠️ [CONTROLLER JSEARCH] Inline search response body is missing both structural 'data' and 'results' property arrays.");
+                        }
+                    }
+                }
             }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to connect or parse response from JSearch RapidAPI within controller container context.");
+            }
+
+            allMatchedJobs.InsertRange(0, liveJobMatches);
 
             var frontendResponsePayload = new Dictionary<string, object>
             {
-                { "score", finalCandidateData.ResumeScore },
-                { "summary", finalCandidateData.Summary },
+                { "score", candidate.ResumeScore },
+                { "summary", candidate.Summary },
                 { "candidate", new Dictionary<string, string> {
-                    { "name", finalCandidateData.Name },
-                    { "email", finalCandidateData.Email },
-                    { "phone", finalCandidateData.Phone },
-                    { "location", finalCandidateData.Location },
-                    { "highestQualification", finalCandidateData.HighestQualification },
-                    { "yearsOfExperience", finalCandidateData.YearsOfExperience }
+                    { "name", candidate.Name },
+                    { "email", candidate.Email },
+                    { "phone", candidate.Phone },
+                    { "location", candidate.Location },
+                    { "highestQualification", candidate.HighestQualification },
+                    { "yearsOfExperience", candidate.YearsOfExperience }
                 }},
-                { "skills", finalCandidateData.Skills.Select(s => s.SkillName).ToList() },
-                
-                { "jobMatches", finalCandidateData.JobMatches.Select(jm => new Dictionary<string, object> {
-                    // camelCase variations
-                    { "matchId", jm.MatchId },
-                    { "matchScore", jm.MatchScore },
-                    { "matchedSkills", jm.MatchedSkills },
-                    { "missingSkills", jm.MissingSkills },
-                    { "jobTitle", jm.Job.Title },
-                    { "companyName", jm.Job.CompanyName },
-                    { "jobLocation", jm.Job.Location },
-                    { "salaryRange", jm.Job.SalaryRange },
-                    
-                    // PascalCase legacy property variations
-                    { "MatchId", jm.MatchId },
-                    { "MatchScore", jm.MatchScore },
-                    { "MatchedSkills", jm.MatchedSkills },
-                    { "MissingSkills", jm.MissingSkills },
-                    { "JobTitle", jm.Job.Title },
-                    { "CompanyName", jm.Job.CompanyName },
-                    { "JobLocation", jm.Job.Location },
-                    { "SalaryRange", jm.Job.SalaryRange }
-                }).OrderByDescending(jm => (int)jm["matchScore"]).ToList() }
+                { "skills", localSkillNames.Select(s => s.ToUpper()).ToList() },
+                { "jobMatches", allMatchedJobs }
             };
-
             return Ok(frontendResponsePayload);
         }
         catch (Exception ex)
@@ -268,5 +333,27 @@ public class CandidateController : ControllerBase
             _logger.LogError(ex, "Fatal failure parsing and mapping system entities on resume ingestion pipelines.");
             return StatusCode(500, new { error = "Internal controller parsing error occurred.", details = ex.Message });
         }
+    }
+
+    private List<string> ParseJobSkillsText(string description, string title)
+    {
+        var discovered = new List<string>();
+        string combined = $"{title} {description}".ToLower();
+
+        var techDictionary = new List<string> { 
+            ".net", "c#", "python", "java", "javascript", "typescript", "sql", "sqlite", 
+            "postgresql", "docker", "aws", "azure", "git", "html", "css", "angular", "react" 
+        };
+
+        foreach (var tech in techDictionary)
+        {
+            if (combined.Contains(tech))
+            {
+                discovered.Add(tech.ToUpper());
+            }
+        }
+        
+        if (!discovered.Any()) discovered.AddRange(new[] { ".NET", "C#", "SQL" });
+        return discovered.Distinct().ToList();
     }
 }

@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -15,19 +16,31 @@ using SkillForge.Models;
 
 namespace SkillForge.API.Services;
 
+public class ResumeAnalysisResult
+{
+    public CandidateDetails Candidate { get; set; } = new();
+    public List<string> Skills { get; set; } = new();
+    public int Score { get; set; }
+    public string Summary { get; set; } = string.Empty;
+}
+
+public class CandidateDetails
+{
+    public string Name { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public string Phone { get; set; } = string.Empty;
+    public string Location { get; set; } = string.Empty;
+    public string HighestQualification { get; set; } = string.Empty;
+    public string YearsOfExperience { get; set; } = string.Empty;
+    public string Role { get; set; } = string.Empty; 
+}
+
 public class AIService
 {
     private readonly IHttpClientFactory _httpFactory;
     private readonly IConfiguration _config;
     private readonly ILogger<AIService> _logger;
     private readonly SkillForgeDbContext _dbContext;
-
-    private static readonly JsonSerializerOptions _serializerOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        PropertyNameCaseInsensitive = true,
-        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
-    };
 
     public AIService(IHttpClientFactory httpFactory, IConfiguration config, ILogger<AIService> logger, SkillForgeDbContext dbContext)
     {
@@ -38,15 +51,16 @@ public class AIService
     }
 
     /// <summary>
-    /// Unified entry-point: Receives the uploaded raw browser file, extracts its underlying content,
-    /// and dispatches the structured string metrics straight into the Gemini AI Engine.
+    /// Unified entry-point: Parses the resume via Gemini first, matches targeted role keywords, 
+    /// and invokes the JSearch sync engine using the dynamically derived target query.
+    /// Returns null if the parsing or processing pipeline encounters an error.
     /// </summary>
-    public async Task<object?> ProcessAndAnalyzeResumeAsync(IFormFile file)
+    public async Task<ResumeAnalysisResult?> ProcessAndAnalyzeResumeAsync(IFormFile file)
     {
         if (file == null || file.Length == 0)
         {
             _logger.LogWarning("Empty or unreadable file container delivered to AI parsing pipeline.");
-            return new { error = "No file data uploaded" };
+            return null;
         }
 
         try
@@ -56,9 +70,8 @@ public class AIService
 
             using var memoryStream = new MemoryStream();
             await file.CopyToAsync(memoryStream);
-            memoryStream.Position = 0; // Reset head stream layout positions for reader consumption
+            memoryStream.Position = 0;
 
-            // Step-routing handler checking file types
             if (fileExtension == ".pdf")
             {
                 extractedText = ExtractTextFromPdf(memoryStream);
@@ -74,28 +87,50 @@ public class AIService
             }
             else
             {
-                return new { error = $"Unsupported document format layout: '{fileExtension}'." };
+                _logger.LogWarning("Unsupported document format layout: '{Extension}'", fileExtension);
+                return null;
             }
 
             if (string.IsNullOrWhiteSpace(extractedText))
             {
-                return new { error = "Failed to parse character symbols out of the uploaded payload file." };
+                _logger.LogWarning("Failed to parse character symbols out of the uploaded payload file.");
+                return null;
             }
 
-            // Pull active real-time listings from 3rd party API to ensure fresh DB inventory before analysis
-            await RefreshLiveJobBankAsync();
+            // 1. Analyze the resume text first to isolate the candidate profile and role
+            var analysisResult = await AnalyzeResumeAsync(extractedText);
 
-            // Route cleanly extracted textual data down to the Gemini analytics engine
-            return await AnalyzeResumeAsync(extractedText);
+            if (analysisResult == null || analysisResult.Candidate == null || string.IsNullOrWhiteSpace(analysisResult.Candidate.Role))
+            {
+                _logger.LogError("❌ [ANALYSIS FAILURE] AI engine failed to extract or deduce a valid professional role.");
+                return null;
+            }
+
+            string extractedRole = analysisResult.Candidate.Role;
+            _logger.LogInformation("🔍 [ROLE DEDUCTION] AI determined candidate role title: '{Role}'", extractedRole);
+
+            // 2. Isolate the target keyword phrase (developer/tester/engineer) and what comes before it
+            var match = Regex.Match(extractedRole, @".*?\b(developer|tester|engineer)\b", RegexOptions.IgnoreCase);
+            
+            string searchJobQuery = match.Success ? match.Value.Trim() : extractedRole.Trim();
+            _logger.LogInformation("🎯 [QUERY MATCH] Formulated JSearch query string: '{Query}'", searchJobQuery);
+
+            // 3. Synchronize live job rows matching the tailored query term exclusively
+            await RefreshLiveJobBankAsync(searchJobQuery);
+
+            return analysisResult;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Fatal failure during document compilation phase processing on file: {Name}", file.FileName);
-            return new { error = "Document file conversion processing exception", details = ex.Message };
+            return null;
         }
     }
 
-    public async Task<object?> AnalyzeResumeAsync(string text)
+    /// <summary>
+    /// Transmits extracted resume text to the Gemini Engine using explicit structural JSON schema definitions.
+    /// </summary>
+    public async Task<ResumeAnalysisResult?> AnalyzeResumeAsync(string text)
     {
         try
         {
@@ -113,10 +148,9 @@ public class AIService
 
             if (!string.IsNullOrWhiteSpace(text))
             {
-                text = System.Text.RegularExpressions.Regex.Replace(text, @"\b(year|years)\s+\1\b", "years", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                text = Regex.Replace(text, @"\b(year|years)\s+\1\b", "years", RegexOptions.IgnoreCase);
             }
 
-            // MODIFIED PROMPT: Strengthened scoring constraints to ensure dynamic variation based on resume metrics
             var promptText = $@"
 You are an expert HR Data Scientist, applicant screening engine, and ATS Resume Engineering Expert specializing in extracting clear structural metrics from engineering resumes.
 Analyze the provided candidate resume text below and extract highly precise structured insights.
@@ -125,20 +159,21 @@ CRITICAL INSTRUCTIONS FOR DYNAMIC SCORING:
 - Calculate a completely dynamic numerical suitability rating (""score"") between 1 and 100 based strictly on the individual candidate's profile.
 - Do NOT reuse static placeholder values (like 50, 65, or 75) for every file.
 - Base the score on: tech stack depth, projects listed, clear tool usage details, and overall completeness of data.
-- A high score (85-100) must be reserved exclusively for candidates displaying exceptional specialization, framework mastery, or comprehensive real-world applications.
-- Average or junior-level engineering resumes should scale proportionally between 45 and 75 based on experience gaps.
+
+ROLE EXTRACTION & ANALYSIS RULES:
+1. **candidate.role**: Identify the candidate's explicit job title from the text (e.g., ""Java Developer"", ""Automation Tester"", ""DevOps Engineer"").
+2. **CRITICAL MANDATE**: If no clear role or job title is directly written or found in the resume text, you MUST analyze their tech stack, listed tools, frameworks, and project descriptions to deduce their role. Synthesize a professional title ending with keywords like 'Developer', 'Tester', or 'Engineer' based on your contextual analysis (e.g., if you see C#, ASP.NET Core, SQL, output ""DotNet Developer""). Do not leave this empty.
 
 LINGUISTIC RECOVERY RULES:
-1. **candidate.name**: Identify the individual name tokens hidden within continuous uppercase or unspaced strings. Convert them to clean Title Case with single spaces (e.g., 'SOUMYAJYOTIKUMAR' must become 'Soumyajyoti Kumar').
-2. **candidate.yearsOfExperience**: Extract the numeric value and unit. Absolutely NEVER duplicate the word 'years' (never output '4 years years').
-3. **Case Normalization**: For fields like names, job titles, and locations, convert solid UPPERCASE run-on strings into standard spaced Title Case.
+1. **candidate.name**: Identify the individual name tokens hidden within continuous uppercase or unspaced strings. Convert them to clean Title Case with single spaces.
+2. **candidate.yearsOfExperience**: Extract the numeric value and unit. Absolutely NEVER duplicate the word 'years'.
+3. **Case Normalization**: Convert solid UPPERCASE run-on strings into standard spaced Title Case.
 4. **summary**: Synthesize a fluid, grammatically flawless 2-3 sentence technical professional summary highlighting their core development stack.
 
 Resume Text to Repair and Parse:
 {text}
 ";
 
-            // Enforce structural JSON output guarantee using explicit Gemini response schema rules
             var payload = new
             {
                 contents = new[]
@@ -155,7 +190,7 @@ Resume Text to Repair and Parse:
                 },
                 generationConfig = new
                 {
-                    temperature = 0.3, // Slightly bumped to allow better score calculation elasticity
+                    temperature = 0.3,
                     maxOutputTokens = 4000,
                     responseMimeType = "application/json",
                     responseSchema = new
@@ -173,9 +208,10 @@ Resume Text to Repair and Parse:
                                     phone = new { type = "string" },
                                     location = new { type = "string" },
                                     highestQualification = new { type = "string" },
-                                    yearsOfExperience = new { type = "string" }
+                                    yearsOfExperience = new { type = "string" },
+                                    role = new { type = "string", description = "The explicit job title or contextually deduced professional title based on tech stack analysis (e.g., DotNet Developer, Automation Tester, Software Engineer)." }
                                 },
-                                required = new[] { "name", "email", "phone", "location", "highestQualification", "yearsOfExperience" }
+                                required = new[] { "name", "email", "phone", "location", "highestQualification", "yearsOfExperience", "role" }
                             },
                             skills = new
                             {
@@ -213,62 +249,61 @@ Resume Text to Repair and Parse:
                 .GetProperty("text")
                 .GetString() ?? "{}";
 
-            _logger.LogInformation("========== RAW CLEANED JSON FROM GEMINI ==========");
-            _logger.LogInformation("{Text}", geminiText);
-            _logger.LogInformation("==================================================");
+            // Defensive Sanitization: Strip any markdown code fences (```json ... ```) if Gemini includes them
+            geminiText = geminiText.Trim();
+            if (geminiText.StartsWith("```"))
+            {
+                geminiText = Regex.Replace(geminiText, @"^```(?:json)?\s*", "", RegexOptions.IgnoreCase);
+                geminiText = Regex.Replace(geminiText, @"\s*```$", "");
+                geminiText = geminiText.Trim();
+            }
 
             using var parsed = JsonDocument.Parse(geminiText);
             var root = parsed.RootElement;
 
             if (!root.TryGetProperty("candidate", out var candidateObj))
             {
-                _logger.LogError("Candidate object missing from inner parse extraction payload.");
+                _logger.LogError("❌ [PARSING ERROR] Candidate object missing from inner parse extraction payload. Raw text: {RawText}", geminiText);
                 return null;
             }
 
-            var candidateResult = new
+            var result = new ResumeAnalysisResult();
+            result.Candidate = new CandidateDetails
             {
-                name = GetStringValue(candidateObj, "name").Replace("years years", "years", StringComparison.OrdinalIgnoreCase).Trim(),
-                email = GetStringValue(candidateObj, "email").Trim(),
-                phone = GetStringValue(candidateObj, "phone").Trim(),
-                location = GetStringValue(candidateObj, "location").Trim(),
-                highestQualification = GetStringValue(candidateObj, "highestQualification").Trim(),
-                yearsOfExperience = GetStringValue(candidateObj, "yearsOfExperience").Replace("years years", "years", StringComparison.OrdinalIgnoreCase).Trim()
+                Name = GetStringValue(candidateObj, "name").Replace("years years", "years", StringComparison.OrdinalIgnoreCase).Trim(),
+                Email = GetStringValue(candidateObj, "email").Trim(),
+                Phone = GetStringValue(candidateObj, "phone").Trim(),
+                Location = GetStringValue(candidateObj, "location").Trim(),
+                HighestQualification = GetStringValue(candidateObj, "highestQualification").Trim(),
+                YearsOfExperience = GetStringValue(candidateObj, "yearsOfExperience").Replace("years years", "years", StringComparison.OrdinalIgnoreCase).Trim(),
+                Role = GetStringValue(candidateObj, "role").Trim()
             };
 
-            var skills = new List<string>();
             if (root.TryGetProperty("skills", out var skillsArray))
             {
                 foreach (var skill in skillsArray.EnumerateArray())
                 {
                     var skillText = skill.GetString();
-                    if (!string.IsNullOrWhiteSpace(skillText)) skills.Add(skillText);
+                    if (!string.IsNullOrWhiteSpace(skillText)) result.Skills.Add(skillText);
                 }
             }
 
-            // FIX: Removed strict default value locks that normalized variations down to 65
-            int score = 70; 
+            result.Score = 70; 
             if (root.TryGetProperty("score", out var scoreElement))
             {
                 if (scoreElement.ValueKind == JsonValueKind.Number) 
                 {
-                    score = scoreElement.GetInt32();
+                    result.Score = scoreElement.GetInt32();
                 }
                 else if (scoreElement.ValueKind == JsonValueKind.String && int.TryParse(scoreElement.GetString(), out var parsedScore)) 
                 {
-                    score = parsedScore;
+                    result.Score = parsedScore;
                 }
             }
 
-            var summary = root.TryGetProperty("summary", out var summaryElement) ? summaryElement.GetString() ?? "" : "";
+            result.Summary = root.TryGetProperty("summary", out var summaryElement) ? summaryElement.GetString() ?? "" : "";
 
-            return new
-            {
-                candidate = candidateResult,
-                skills,
-                score,
-                summary
-            };
+            return result;
         }
         catch (Exception ex)
         {
@@ -278,92 +313,181 @@ Resume Text to Repair and Parse:
     }
 
     /// <summary>
-    /// Fetches live engineering jobs from the free Arbeitnow Job Board API and dynamically ingests them into the internal SQLite DB.
+    /// Parameterless overload used by external triggers (like app startup background synchronizations or manual sync tasks)
+    /// to clean up compiler complaints without interfering with the targeted resume pipeline workflows.
     /// </summary>
     public async Task RefreshLiveJobBankAsync()
     {
+        await RefreshLiveJobBankAsync("Developer");
+    }
+
+    /// <summary>
+    /// Exclusively requests live roles from the JSearch API platform using the dynamically isolated query parameter.
+    /// </summary>
+    public async Task RefreshLiveJobBankAsync(string searchQuery)
+    {
         try
         {
-            _logger.LogInformation("🔄 Initializing dynamic live job ingestion synchronizer from external API...");
+            _logger.LogInformation("🔄 [JSEARCH] Initializing live synchronization process...");
+            
+            var apiKey = _config["RapidAPI:Key"];
+            var apiHost = _config["RapidAPI:ApiHost"] ?? "jsearch.p.rapidapi.com";
+
+            if (string.IsNullOrWhiteSpace(apiKey))
+            {
+                _logger.LogError("❌ [JSEARCH] Configuration Error: 'RapidAPI:Key' is empty or missing. Aborting synchronization.");
+                return;
+            }
+
             var client = _httpFactory.CreateClient();
-            var apiResponse = await client.GetAsync("https://www.arbeitnow.com/api/job-board-api");
+            
+            client.DefaultRequestHeaders.Add("x-rapidapi-key", apiKey);
+            client.DefaultRequestHeaders.Add("x-rapidapi-host", apiHost);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("SkillForgeAPI/1.0");
+
+            var requestUrl = $"https://{apiHost}/search-v2?query={Uri.EscapeDataString(searchQuery)}&num_pages=1&country=us&date_posted=all";
+            _logger.LogInformation("🌐 [JSEARCH] Dispatching query to API URL: {Url}", requestUrl);
+
+            var apiResponse = await client.GetAsync(requestUrl);
             
             if (!apiResponse.IsSuccessStatusCode)
             {
-                _logger.LogWarning("External Jobs feed returned status code {Code}. Defaulting to existing local database indexes.", apiResponse.StatusCode);
+                string errorBody = await apiResponse.Content.ReadAsStringAsync();
+                _logger.LogError("❌ [JSEARCH] API Request Rejected. Status Code: {Code}, Server Message: {Message}", apiResponse.StatusCode, errorBody);
                 return;
             }
 
             string rawJsonData = await apiResponse.Content.ReadAsStringAsync();
+            _logger.LogInformation("=== RAW JSEARCH API RESPONSE (FROM SERVICE) ===\n{Response}", rawJsonData);
             using var document = JsonDocument.Parse(rawJsonData);
             
-            if (!document.RootElement.TryGetProperty("data", out var jobsArray) || jobsArray.ValueKind != JsonValueKind.Array)
+            JsonElement jobsArray = default;
+            bool foundJobArray = false;
+
+            if (document.RootElement.TryGetProperty("data", out var dataElement))
             {
-                _logger.LogWarning("External jobs feed payload did not match expected structural specifications.");
+                if (dataElement.ValueKind == JsonValueKind.Object && dataElement.TryGetProperty("jobs", out var innerJobs) && innerJobs.ValueKind == JsonValueKind.Array)
+                {
+                    jobsArray = innerJobs;
+                    foundJobArray = true;
+                }
+                else if (dataElement.ValueKind == JsonValueKind.Array)
+                {
+                    jobsArray = dataElement;
+                    foundJobArray = true;
+                }
+            }
+            else if (document.RootElement.TryGetProperty("results", out var resultsElement) && resultsElement.ValueKind == JsonValueKind.Array)
+            {
+                jobsArray = resultsElement;
+                foundJobArray = true;
+            }
+
+            if (!foundJobArray)
+            {
+                _logger.LogError("❌ [JSEARCH DETAILED ERROR] Root job array ('data' or 'results') is missing or malformed.\n🔴 RAW PAYLOAD FROM SERVER:\n{RawJson}", rawJsonData);
+                return;
+            }
+
+            int totalPayloadJobs = jobsArray.GetArrayLength();
+            _logger.LogInformation("📊 [JSEARCH] Connection Verified. Extracted [{Count}] live jobs matching query variant: '{Query}'", totalPayloadJobs, searchQuery);
+
+            if (totalPayloadJobs == 0)
+            {
+                _logger.LogWarning("⚠️ [JSEARCH] The API returned a success status code but zero matching records were found for query: '{Terms}'", searchQuery);
                 return;
             }
 
             int ingestedCounter = 0;
+            int skippedCounter = 0;
+
+            var existingJobs = await _dbContext.Jobs
+                .Select(j => new { Title = j.Title.Trim(), CompanyName = j.CompanyName.Trim() })
+                .ToListAsync();
+
+            _logger.LogInformation("🗄️ [LOCAL DB] Found {Count} total pre-existing items in local SQLite cache.", existingJobs.Count);
 
             foreach (var externalJob in jobsArray.EnumerateArray())
             {
-                string slugToken = externalJob.GetProperty("slug").GetString() ?? Guid.NewGuid().ToString();
-                string title = externalJob.GetProperty("title").GetString() ?? "Software Engineer";
-                string company = externalJob.GetProperty("company_name").GetString() ?? "Global Tech Corp";
-                string location = externalJob.GetProperty("location").GetString() ?? "Remote";
+                string title = (externalJob.TryGetProperty("job_title", out var t) ? t.GetString() : null) 
+                            ?? (externalJob.TryGetProperty("title", out var t2) ? t2.GetString() : null) 
+                            ?? "Unknown Position";
+
+                string company = (externalJob.TryGetProperty("employer_name", out var c) ? c.GetString() : null) 
+                              ?? (externalJob.TryGetProperty("company_name", out var c2) ? c2.GetString() : null) 
+                              ?? "Unknown Company";
+
+                string description = (externalJob.TryGetProperty("job_description", out var d) ? d.GetString() : null) 
+                                  ?? (externalJob.TryGetProperty("description", out var d2) ? d2.GetString() : null) 
+                                  ?? "";
                 
-                // Duplicate protection check
-                bool jobExists = await _dbContext.Jobs.AnyAsync(j => j.Title == title && j.CompanyName == company);
-                if (jobExists) continue;
+                string city = externalJob.TryGetProperty("job_city", out var ct) ? ct.GetString() : null;
+                string country = externalJob.TryGetProperty("job_country", out var cn) ? cn.GetString() : null;
+                string location = (!string.IsNullOrEmpty(city) && !string.IsNullOrEmpty(country)) ? $"{city}, {country}" : (city ?? country ?? "Remote");
+
+                title = title.Trim();
+                company = company.Trim();
+
+                _logger.LogInformation("📥 [JSEARCH EVALUATION] Examining item row: '{Title}' at '{Company}'...", title, company);
+
+                bool jobExists = existingJobs.Any(ej => ej.Title.Equals(title, StringComparison.OrdinalIgnoreCase) 
+                                                     && ej.CompanyName.Equals(company, StringComparison.OrdinalIgnoreCase));
+                
+                if (jobExists)
+                {
+                    _logger.LogInformation("⏭️ [JSEARCH SKIP] Record variant already caught in indexing tables. Dropping row entry.");
+                    skippedCounter++;
+                    continue;
+                }
 
                 var newJobRecord = new Job
                 {
                     Title = title,
                     CompanyName = company,
                     Location = location,
-                    SalaryRange = "$85,000 - $125,000", 
-                    Description = $"Live vacancy at {company}. Target tracking slug: {slugToken}.",
+                    SalaryRange = "Competitive / Market Rate", 
+                    Description = description,
                     CreatedAt = DateTime.UtcNow,
                     RequiredSkills = new List<JobSkill>() 
                 };
 
-                // Heuristic mapping to seed required skills relations based on vacancy keywords
-                var inferredSkills = new List<string> { "Git" };
-                string lowerTitle = title.ToLower();
-
-                if (lowerTitle.Contains("dot") || lowerTitle.Contains(".net") || lowerTitle.Contains("c#")) 
-                    inferredSkills.AddRange(new[] { "C#", ".NET Core", "ASP.NET Core" });
-                if (lowerTitle.Contains("python") || lowerTitle.Contains("data") || lowerTitle.Contains("ai") || lowerTitle.Contains("learning")) 
-                    inferredSkills.AddRange(new[] { "Python", "Machine Learning", "Data Analytics" });
-                if (lowerTitle.Contains("java") && !lowerTitle.Contains("script")) 
-                    inferredSkills.AddRange(new[] { "Java", "Spring Boot" });
-                if (lowerTitle.Contains("react") || lowerTitle.Contains("javascript") || lowerTitle.Contains("frontend") || lowerTitle.Contains("node")) 
-                    inferredSkills.AddRange(new[] { "JavaScript", "React", "HTML5", "CSS3" });
-                if (lowerTitle.Contains("cloud") || lowerTitle.Contains("devops") || lowerTitle.Contains("aws") || lowerTitle.Contains("docker")) 
-                    inferredSkills.AddRange(new[] { "AWS", "Docker", "Cloud Architecture" });
-                if (lowerTitle.Contains("sql") || lowerTitle.Contains("backend") || lowerTitle.Contains("database")) 
-                    inferredSkills.AddRange(new[] { "SQL Server", "Database Design" });
-
-                foreach (var skillName in inferredSkills.Distinct())
+                if (externalJob.TryGetProperty("job_highlights", out var highlightsObj) && highlightsObj.ValueKind == JsonValueKind.Object)
                 {
-                    newJobRecord.RequiredSkills.Add(new JobSkill
+                    if (highlightsObj.TryGetProperty("Qualifications", out var qualificationsArray) && qualificationsArray.ValueKind == JsonValueKind.Array)
                     {
-                        SkillName = skillName
-                    });
+                        foreach (var qualificationElement in qualificationsArray.EnumerateArray())
+                        {
+                            var qualificationString = qualificationElement.GetString();
+                            if (!string.IsNullOrWhiteSpace(qualificationString))
+                            {
+                                var skillTag = qualificationString.Length > 50 ? qualificationString.Substring(0, 47) + "..." : qualificationString;
+                                newJobRecord.RequiredSkills.Add(new JobSkill
+                                {
+                                    SkillName = skillTag.Trim()
+                                });
+                            }
+                        }
+                    }
                 }
 
                 _dbContext.Jobs.Add(newJobRecord);
-                await _dbContext.SaveChangesAsync();
+                existingJobs.Add(new { Title = title, CompanyName = company });
                 ingestedCounter++;
                 
-                if (ingestedCounter >= 10) break; // Limit batch cycles to protect thread performance
+                _logger.LogInformation("✅ [JSEARCH STAGE] Successfully added '{Title}' by '{Company}' to tracking context batch.", title, company);
             }
 
-            _logger.LogInformation("✅ Success! Ingested {Count} fresh real live vacancies into database tables.", ingestedCounter);
+            if (ingestedCounter > 0)
+            {
+                _logger.LogInformation("💾 [LOCAL DB] Flushing tracked batch collection to database storage files...");
+                await _dbContext.SaveChangesAsync();
+            }
+
+            _logger.LogInformation("🚀 [JSEARCH PROCESS COMPLETE] Loop finished. Ingested completely fresh unique items: {Ingested}. Duplicates skipped: {Skipped}.", ingestedCounter, skippedCounter);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error processing external third party live sync operations.");
+            _logger.LogError(ex, "❌ [JSEARCH CRITICAL FAILURE] Thread aborted due to an internal execution crash.");
         }
     }
 

@@ -59,6 +59,7 @@ public class Job
     public string Location { get; set; } = "";
     public string SalaryRange { get; set; } = "";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public string ApplyUrl { get; set; } = "";
     
     public virtual ICollection<JobSkill> RequiredSkills { get; set; } = new List<JobSkill>();
     public virtual ICollection<JobMatch> Matches { get; set; } = new List<JobMatch>();
