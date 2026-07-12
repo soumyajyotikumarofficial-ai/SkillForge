@@ -22,6 +22,8 @@ public class ApifyJobResult
     public string Country { get; set; } = "";
     public string Description { get; set; } = "";
     public string SalaryRange { get; set; } = "";
+    public string Currency { get; set; } = "USD";
+    public DateTime? SourceCreatedAt { get; set; }
     public string ApplyUrl { get; set; } = "";
     public string Benefits { get; set; } = ""; // Flattened, comma-separated
 }
@@ -131,7 +133,7 @@ public class ApifyJobService
             : (!string.IsNullOrWhiteSpace(country) ? country : "Remote");
 
         string description = GetFirstString(item, "description", "descriptionText", "job_description") ?? "";
-        string salary = GetFirstString(item, "salary", "salaryRange", "job_salary_string") ?? "Competitive / Market Rate";
+        string salary = GetFirstString(item, "salary", "salaryRange", "job_salary_string") ?? "";
 
         // URL Direct Linkage: map the incoming application link straight through to ApplyUrl.
         string applyUrl = GetFirstString(item, "url", "externalApplyLink", "applyUrl", "job_apply_link") ?? "";
@@ -152,7 +154,9 @@ public class ApifyJobService
             Location = location.Trim(),
             Country = country.Trim(),
             Description = description,
-            SalaryRange = salary.Trim(),
+            SalaryRange = string.IsNullOrWhiteSpace(salary) ? "NA" : salary.Trim(),
+            Currency = GetCurrencyFromCountry(country),
+            SourceCreatedAt = ParseSourceCreatedAt(item),
             ApplyUrl = applyUrl.Trim(),
             Benefits = benefits
         };
@@ -169,6 +173,57 @@ public class ApifyJobService
             }
         }
         return null;
+    }
+
+    private static DateTime? ParseSourceCreatedAt(JsonElement element)
+    {
+        foreach (var name in new[] { "postedAt", "datePosted", "createdAt", "jobPostedDate", "publishedDate" })
+        {
+            if (element.TryGetProperty(name, out var prop) && prop.ValueKind == JsonValueKind.String)
+            {
+                var rawValue = prop.GetString();
+                if (!string.IsNullOrWhiteSpace(rawValue) && DateTime.TryParse(rawValue, out var parsed))
+                {
+                    return parsed.ToUniversalTime();
+                }
+            }
+
+            if (element.TryGetProperty(name, out prop) && prop.ValueKind == JsonValueKind.Number && prop.TryGetInt64(out var epoch))
+            {
+                try
+                {
+                    return DateTimeOffset.FromUnixTimeSeconds(epoch).UtcDateTime;
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static string GetCurrencyFromCountry(string country)
+    {
+        if (string.IsNullOrWhiteSpace(country))
+        {
+            return "USD";
+        }
+
+        var normalized = country.Trim().ToUpperInvariant();
+        return normalized switch
+        {
+            "IN" or "INDIA" => "INR",
+            "US" or "UNITED STATES" => "USD",
+            "GB" or "UK" or "UNITED KINGDOM" => "GBP",
+            "CA" or "CANADA" => "CAD",
+            "AU" or "AUSTRALIA" => "AUD",
+            "DE" or "GERMANY" or "FR" or "FRANCE" or "ES" or "SPAIN" or "IT" or "ITALY" or "NL" or "NETHERLANDS" => "EUR",
+            "SG" or "SINGAPORE" => "SGD",
+            "AE" or "UNITED ARAB EMIRATES" => "AED",
+            "JP" or "JAPAN" => "JPY",
+            _ => "USD"
+        };
     }
 
     private static bool TryGetArray(JsonElement element, out JsonElement result, params string[] propertyNames)

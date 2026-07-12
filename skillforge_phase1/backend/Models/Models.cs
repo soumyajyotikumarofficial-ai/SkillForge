@@ -58,7 +58,10 @@ public class Job
     public string CompanyName { get; set; } = "";
     public string Location { get; set; } = "";
     public string SalaryRange { get; set; } = "";
+    public string Currency { get; set; } = "USD";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime FetchedAtUtc { get; set; } = DateTime.UtcNow;
+    public DateTime? SourceCreatedAt { get; set; }
     public string ApplyUrl { get; set; } = "";
     public string Country { get; set; } = "";
     public string Benefits { get; set; } = ""; // Flattened, comma-separated list of job benefits
@@ -92,4 +95,16 @@ public class JobMatch
     
     public virtual Job? Job { get; set; }
     public virtual Candidate? Candidate { get; set; }
+}
+
+public class JobFetchHistory
+{
+    public int JobFetchHistoryId { get; set; }
+    public DateTime LastSuccessfulFetchUtc { get; set; } = DateTime.UtcNow;
+    public string LastQuery { get; set; } = "";
+    public string LastLocation { get; set; } = "";
+    public string LastCountry { get; set; } = "";
+    public int InsertedCount { get; set; }
+    public int SkippedCount { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }

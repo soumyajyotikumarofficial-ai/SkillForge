@@ -19,6 +19,7 @@ public class SkillForgeDbContext : DbContext
     public DbSet<Job> Jobs { get; set; }
     public DbSet<JobSkill> JobSkills { get; set; }
     public DbSet<JobMatch> JobMatches { get; set; }
+    public DbSet<JobFetchHistory> JobFetchHistories { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -78,6 +79,9 @@ public class SkillForgeDbContext : DbContext
         modelBuilder.Entity<JobMatch>()
             .HasKey(m => m.MatchId);
 
+        modelBuilder.Entity<JobFetchHistory>()
+            .HasKey(h => h.JobFetchHistoryId);
+
         // ===== SEED DEFAULT DATA =====
         // ✅ FIX: Use FIXED date instead of DateTime.UtcNow
         var seedDate = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
@@ -116,7 +120,9 @@ public class SkillForgeDbContext : DbContext
                     CompanyName = "SkillForge Inc",
                     Location = "Remote",
                     SalaryRange = "50000-120000",
-                    CreatedAt = seedDate  // ✅ FIXED: Static date
+                    Currency = "USD",
+                    CreatedAt = seedDate,  // ✅ FIXED: Static date
+                    FetchedAtUtc = seedDate
                 }
             );
 

@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using SkillForge.Data;
 
@@ -10,9 +11,11 @@ using SkillForge.Data;
 namespace SkillForge.API.Migrations
 {
     [DbContext(typeof(SkillForgeDbContext))]
-    partial class SkillForgeDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260712070143_AddIncrementalFetchHistoryAndCurrencyFields")]
+    partial class AddIncrementalFetchHistoryAndCurrencyFields
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.9");
@@ -162,7 +165,7 @@ namespace SkillForge.API.Migrations
                             CreatedAt = new DateTime(2024, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             Currency = "USD",
                             Description = "Looking for an experienced C# Developer",
-                            FetchedAtUtc = new DateTime(2024, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            FetchedAtUtc = new DateTime(2026, 7, 12, 7, 1, 41, 806, DateTimeKind.Utc).AddTicks(5187),
                             Location = "Remote",
                             SalaryRange = "50000-120000",
                             Title = "C# Developer"
@@ -177,7 +180,7 @@ namespace SkillForge.API.Migrations
                             CreatedAt = new DateTime(2024, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             Currency = "USD",
                             Description = "Looking for an experienced React Developer",
-                            FetchedAtUtc = new DateTime(2024, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            FetchedAtUtc = new DateTime(2026, 7, 12, 7, 1, 41, 807, DateTimeKind.Utc).AddTicks(923),
                             Location = "Remote",
                             SalaryRange = "50000-120000",
                             Title = "React Developer"
@@ -192,7 +195,7 @@ namespace SkillForge.API.Migrations
                             CreatedAt = new DateTime(2024, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             Currency = "USD",
                             Description = "Looking for an experienced DevOps Engineer",
-                            FetchedAtUtc = new DateTime(2024, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            FetchedAtUtc = new DateTime(2026, 7, 12, 7, 1, 41, 807, DateTimeKind.Utc).AddTicks(998),
                             Location = "Remote",
                             SalaryRange = "50000-120000",
                             Title = "DevOps Engineer"
@@ -207,7 +210,7 @@ namespace SkillForge.API.Migrations
                             CreatedAt = new DateTime(2024, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             Currency = "USD",
                             Description = "Looking for an experienced Data Engineer",
-                            FetchedAtUtc = new DateTime(2024, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            FetchedAtUtc = new DateTime(2026, 7, 12, 7, 1, 41, 807, DateTimeKind.Utc).AddTicks(1061),
                             Location = "Remote",
                             SalaryRange = "50000-120000",
                             Title = "Data Engineer"
@@ -222,7 +225,7 @@ namespace SkillForge.API.Migrations
                             CreatedAt = new DateTime(2024, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             Currency = "USD",
                             Description = "Looking for an experienced Full Stack Developer",
-                            FetchedAtUtc = new DateTime(2024, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            FetchedAtUtc = new DateTime(2026, 7, 12, 7, 1, 41, 807, DateTimeKind.Utc).AddTicks(1122),
                             Location = "Remote",
                             SalaryRange = "50000-120000",
                             Title = "Full Stack Developer"

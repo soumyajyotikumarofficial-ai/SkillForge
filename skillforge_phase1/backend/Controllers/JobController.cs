@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
+using SkillForge.API.Services;
 using SkillForge.Data;
 using SkillForge.Models;
 using System.Security.Claims;
@@ -14,11 +15,92 @@ public class JobController : ControllerBase
 {
     private readonly SkillForgeDbContext _dbContext;
     private readonly ILogger<JobController> _logger;
+    private readonly LiveJobFetcherService _liveJobFetcherService;
 
-    public JobController(SkillForgeDbContext dbContext, ILogger<JobController> logger)
+    public JobController(SkillForgeDbContext dbContext, ILogger<JobController> logger, LiveJobFetcherService liveJobFetcherService)
     {
         _dbContext = dbContext;
         _logger = logger;
+        _liveJobFetcherService = liveJobFetcherService;
+    }
+
+    [HttpPost("run-daily-sync")]
+    [AllowAnonymous]
+    public async Task<IActionResult> RunDailySync([FromQuery] bool force = false)
+    {
+        try
+        {
+            var result = await _liveJobFetcherService.RunManualSyncAsync(force, HttpContext.RequestAborted);
+            return Ok(new
+            {
+                message = "Manual daily sync completed.",
+                result.ForcedFullFetch,
+                result.InsertedCount,
+                result.SkippedCount,
+                result.FilteredByDateCount,
+                result.DuplicateCount,
+                result.NonItFilteredCount,
+                result.GeoMismatchCount,
+                result.ApiFetchedCount,
+                result.TargetCombinationCount,
+                result.ExecutedAtUtc
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error running manual daily sync");
+            return StatusCode(500, new { error = "Manual daily sync failed.", details = ex.Message });
+        }
+    }
+
+    [HttpGet("live-sync-status")]
+    [AllowAnonymous]
+    public async Task<IActionResult> GetLiveSyncStatus()
+    {
+        try
+        {
+            var latest = await _dbContext.JobFetchHistories
+                .OrderByDescending(h => h.LastSuccessfulFetchUtc)
+                .Select(h => new
+                {
+                    h.LastSuccessfulFetchUtc,
+                    h.InsertedCount,
+                    h.SkippedCount,
+                    h.LastQuery,
+                    h.LastLocation,
+                    h.LastCountry,
+                    h.CreatedAt
+                })
+                .FirstOrDefaultAsync();
+
+            var recentRuns = await _dbContext.JobFetchHistories
+                .OrderByDescending(h => h.LastSuccessfulFetchUtc)
+                .Take(5)
+                .Select(h => new
+                {
+                    h.LastSuccessfulFetchUtc,
+                    h.InsertedCount,
+                    h.SkippedCount,
+                    h.LastCountry
+                })
+                .ToListAsync();
+
+            var totalJobs = await _dbContext.Jobs.CountAsync();
+            var jobsLast24h = await _dbContext.Jobs.CountAsync(j => j.FetchedAtUtc >= DateTime.UtcNow.AddHours(-24));
+
+            return Ok(new
+            {
+                totalJobs,
+                jobsLast24h,
+                latestRun = latest,
+                recentRuns
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching live sync status");
+            return StatusCode(500, new { error = "Failed to fetch live sync status.", details = ex.Message });
+        }
     }
 
     [HttpGet]

@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Security.Cryptography;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -129,21 +130,6 @@ public class AIService
 
                 searchJobQuery = match.Success ? match.Value.Trim() : extractedRole.Trim();
                 _logger.LogInformation("🎯 [QUERY MATCH] Formulated Apify actor query string: '{Query}'", searchJobQuery);
-            }
-
-            // 2. Determine which locations to search against. Default behavior (no preferences supplied)
-            // is preserved: a single sync run against the default location/country.
-            string country = !string.IsNullOrWhiteSpace(preferences?.Country) ? preferences!.Country!.Trim() : "US";
-            var locations = preferences?.GetCleanLocations() ?? new List<string>();
-            if (locations.Count == 0)
-            {
-                locations.Add("United States");
-            }
-
-            // 3. Synchronize live job rows matching the tailored query term across each preferred location
-            foreach (var location in locations)
-            {
-                await RefreshLiveJobBankAsync(searchJobQuery, location, country);
             }
 
             return analysisResult;
@@ -316,17 +302,19 @@ Resume Text to Repair and Parse:
                 }
             }
 
-            result.Score = 70; 
-            if (root.TryGetProperty("score", out var scoreElement))
+            var heuristicScore = CalculateHeuristicScore(result, text);
+            int? modelScore = TryParseModelScore(root);
+
+            if (modelScore.HasValue)
             {
-                if (scoreElement.ValueKind == JsonValueKind.Number) 
-                {
-                    result.Score = scoreElement.GetInt32();
-                }
-                else if (scoreElement.ValueKind == JsonValueKind.String && int.TryParse(scoreElement.GetString(), out var parsedScore)) 
-                {
-                    result.Score = parsedScore;
-                }
+                // Keep model score as a weak signal; raw resume-derived heuristic drives final variance.
+                var modelWeight = IsCommonStaticScore(modelScore.Value) ? 0.15 : 0.25;
+                var blendedScore = (int)Math.Round((modelWeight * modelScore.Value) + ((1 - modelWeight) * heuristicScore));
+                result.Score = Math.Clamp(blendedScore, 1, 100);
+            }
+            else
+            {
+                result.Score = heuristicScore;
             }
 
             result.Summary = root.TryGetProperty("summary", out var summaryElement) ? summaryElement.GetString() ?? "" : "";
@@ -452,6 +440,119 @@ Resume Text to Repair and Parse:
             JsonValueKind.False => "false",
             _ => "N/A"
         };
+    }
+
+    private static int? TryParseModelScore(JsonElement root)
+    {
+        if (!root.TryGetProperty("score", out var scoreElement))
+        {
+            return null;
+        }
+
+        if (scoreElement.ValueKind == JsonValueKind.Number && scoreElement.TryGetInt32(out var numericScore))
+        {
+            return Math.Clamp(numericScore, 1, 100);
+        }
+
+        if (scoreElement.ValueKind == JsonValueKind.String)
+        {
+            var scoreText = scoreElement.GetString() ?? string.Empty;
+            var match = Regex.Match(scoreText, @"\d{1,3}");
+            if (match.Success && int.TryParse(match.Value, out var parsedScore))
+            {
+                return Math.Clamp(parsedScore, 1, 100);
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsCommonStaticScore(int score)
+    {
+        return score == 50 || score == 65 || score == 70 || score == 75;
+    }
+
+    private static int CalculateHeuristicScore(ResumeAnalysisResult result, string rawText)
+    {
+        var normalizedText = rawText?.ToLowerInvariant() ?? string.Empty;
+
+        var uniqueSkills = result.Skills
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Select(s => s.Trim().ToLowerInvariant())
+            .Distinct()
+            .Count();
+
+        var skillPoints = Math.Min(25, uniqueSkills * 2);
+
+        var experienceYears = ExtractYears(result.Candidate.YearsOfExperience);
+        var experiencePoints = Math.Min(20, (int)Math.Round(experienceYears * 2.5));
+
+        var qualification = (result.Candidate.HighestQualification ?? string.Empty).ToLowerInvariant();
+        var qualificationPoints = qualification switch
+        {
+            var q when q.Contains("phd") || q.Contains("doctor") => 15,
+            var q when q.Contains("master") || q.Contains("m.tech") || q.Contains("mba") => 12,
+            var q when q.Contains("bachelor") || q.Contains("b.tech") || q.Contains("b.e") => 10,
+            var q when q.Contains("diploma") => 6,
+            _ => 4
+        };
+
+        var rolePoints = string.IsNullOrWhiteSpace(result.Candidate.Role) ? 0 : 6;
+
+        var summaryWords = Regex.Matches(result.Summary ?? string.Empty, @"\b\w+\b").Count;
+        var summaryPoints = Math.Min(8, summaryWords / 10);
+
+        var rawTechDictionary = new[]
+        {
+            ".net", "asp.net", "c#", "java", "python", "sql", "azure", "aws", "docker", "kubernetes",
+            "react", "angular", "node", "typescript", "javascript", "microservices", "devops", "ci/cd", "terraform", "git"
+        };
+        var rawTechHits = rawTechDictionary.Count(token => normalizedText.Contains(token, StringComparison.Ordinal));
+        var rawTechPoints = Math.Min(20, rawTechHits * 2);
+
+        var projectSignalDictionary = new[] { "project", "implemented", "developed", "designed", "deployed", "internship", "experience", "github", "production" };
+        var projectSignalHits = projectSignalDictionary.Count(token => normalizedText.Contains(token, StringComparison.Ordinal));
+        var projectSignalPoints = Math.Min(8, projectSignalHits);
+
+        var wordCount = Regex.Matches(rawText ?? string.Empty, @"\b\w+\b").Count;
+        var densityPoints = Math.Min(8, wordCount / 120);
+
+        var baseScore = 12;
+        var heuristic = baseScore
+            + skillPoints
+            + experiencePoints
+            + qualificationPoints
+            + rolePoints
+            + summaryPoints
+            + rawTechPoints
+            + projectSignalPoints
+            + densityPoints
+            + ComputeDeterministicOffset(rawText ?? string.Empty);
+
+        return Math.Clamp(heuristic, 1, 100);
+    }
+
+    private static int ComputeDeterministicOffset(string source)
+    {
+        var text = source ?? string.Empty;
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(text));
+        return (bytes[0] % 5) - 2; // deterministic offset in range [-2, +2]
+    }
+
+    private static double ExtractYears(string yearsText)
+    {
+        if (string.IsNullOrWhiteSpace(yearsText))
+        {
+            return 0;
+        }
+
+        var match = Regex.Match(yearsText, @"\d+(?:\.\d+)?");
+        if (!match.Success)
+        {
+            return 0;
+        }
+
+        return double.TryParse(match.Value, out var years) ? years : 0;
     }
 
     private string ExtractTextFromPdf(MemoryStream stream)

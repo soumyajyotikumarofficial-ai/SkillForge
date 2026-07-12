@@ -3,13 +3,10 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Collections.Generic;
-using System.Text.Json;
-using System.Net.Http;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Configuration;
 using SkillForge.Models;
 using SkillForge.API.Services;
 using SkillForge.Data;
@@ -24,21 +21,15 @@ public class CandidateController : ControllerBase
     private readonly SkillForgeDbContext _dbContext;
     private readonly AIService _aiService;
     private readonly ILogger<CandidateController> _logger;
-    private readonly IConfiguration _configuration;
-    private readonly ApifyJobService _apifyJobService;
 
     public CandidateController(
         SkillForgeDbContext dbContext, 
         AIService aiService, 
-        ILogger<CandidateController> logger,
-        IConfiguration configuration,
-        ApifyJobService apifyJobService)
+        ILogger<CandidateController> logger)
     {
         _dbContext = dbContext;
         _aiService = aiService;
         _logger = logger;
-        _configuration = configuration;
-        _apifyJobService = apifyJobService;
     }
 
     [HttpPost("upload-resume")]
@@ -154,17 +145,22 @@ public class CandidateController : ControllerBase
                 await _dbContext.SaveChangesAsync();
             }
 
-            // Resolve the target role query and location scope once, shared by both the local DB
-            // filter and the live Apify fetch below, so only relevant jobs are ever surfaced.
-            string primaryQuerySkill = preferences.HasRoleAspiration
+            // Resolve the target role query and location scope once so only matching DB jobs are surfaced.
+            bool hasExplicitRole = preferences.HasRoleAspiration;
+            string primaryQuerySkill = hasExplicitRole
                 ? preferences.RoleAspiration!.Trim()
                 : (localSkillNames.FirstOrDefault() ?? ".NET Developer");
 
-            string liveMatchCountry = !string.IsNullOrWhiteSpace(preferences.Country) ? preferences.Country!.Trim() : "US";
-            var liveMatchLocations = preferences.GetCleanLocations();
-            if (liveMatchLocations.Count == 0)
+            var normalizedCandidateSkills = localSkillNames
+                .SelectMany(ExpandSkillKeywords)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            string preferredCountry = !string.IsNullOrWhiteSpace(preferences.Country) ? preferences.Country!.Trim() : "IN";
+            var preferredLocations = preferences.GetCleanLocations();
+            if (preferredLocations.Count == 0)
             {
-                liveMatchLocations.Add("United States");
+                preferredLocations.Add("India");
             }
 
             var roleKeywords = primaryQuerySkill
@@ -172,12 +168,13 @@ public class CandidateController : ControllerBase
                 .Where(k => k.Length > 2)
                 .ToList();
 
-            // Only surface jobs whose title relates to the target role AND whose location overlaps
-            // with one of the candidate's preferred locations — never the entire Jobs table.
             var currentOpenJobs = (await _dbContext.Jobs.ToListAsync())
                 .Where(job =>
-                    (roleKeywords.Count == 0 || roleKeywords.Any(k => job.Title.Contains(k, StringComparison.OrdinalIgnoreCase)))
-                    && liveMatchLocations.Any(loc => job.Location.Contains(loc, StringComparison.OrdinalIgnoreCase) || loc.Contains(job.Location, StringComparison.OrdinalIgnoreCase))
+                    MatchesJobByRoleOrSkills(job, hasExplicitRole, roleKeywords, normalizedCandidateSkills)
+                    && preferredLocations.Any(loc => job.Location.Contains(loc, StringComparison.OrdinalIgnoreCase) || loc.Contains(job.Location, StringComparison.OrdinalIgnoreCase))
+                    && (string.IsNullOrWhiteSpace(job.Country)
+                        || job.Country.Contains(preferredCountry, StringComparison.OrdinalIgnoreCase)
+                        || preferredCountry.Contains(job.Country, StringComparison.OrdinalIgnoreCase))
                 )
                 .ToList();
 
@@ -188,11 +185,11 @@ public class CandidateController : ControllerBase
             foreach (var job in currentOpenJobs)
             {
                 var requiredSkills = ParseJobSkillsText(job.Description, job.Title);
-                var matched = localSkillNames
+                var matched = normalizedCandidateSkills
                     .Intersect(requiredSkills.Select(s => s.ToLower()), StringComparer.OrdinalIgnoreCase)
                     .ToList();
                 var missing = requiredSkills
-                    .Where(s => !localSkillNames.Contains(s.ToLower()))
+                    .Where(s => !normalizedCandidateSkills.Contains(s.ToLower(), StringComparer.OrdinalIgnoreCase))
                     .ToList();
 
                 int calculatedMatchScore = requiredSkills.Count > 0 
@@ -204,7 +201,7 @@ public class CandidateController : ControllerBase
                     calculatedMatchScore = 45;
                 }
 
-                string matchedSkillsCsv = matched.Any() ? string.Join(", ", matched).ToUpper() : "NONE";
+                string matchedSkillsCsv = matched.Any() ? string.Join(", ", matched).ToUpperInvariant() : "NONE";
                 string missingSkillsCsv = missing.Any() ? string.Join(", ", missing).ToUpper() : "NONE";
 
                 if (existingMatchDictionary.TryGetValue(job.JobId, out var existingMatchRecord))
@@ -253,8 +250,11 @@ public class CandidateController : ControllerBase
                     { "jobTitle", job.Title },
                     { "companyName", job.CompanyName },
                     { "jobLocation", job.Location },
-                    { "salaryRange", job.SalaryRange },
+                    { "salaryRange", FormatSalary(job) },
+                    { "currency", job.Currency },
+                    { "country", job.Country },
                     { "applyUrl", job.ApplyUrl ?? "https://linkedin.com" },
+                    { "benefits", job.Benefits ?? "" },
                     { "explanation", explanation },
                     { "MatchScore", currentScore },
                     { "MatchedSkills", matchRecord?.MatchedSkills ?? "NONE" },
@@ -262,60 +262,14 @@ public class CandidateController : ControllerBase
                     { "JobTitle", job.Title },
                     { "CompanyName", job.CompanyName },
                     { "JobLocation", job.Location },
-                    { "SalaryRange", job.SalaryRange },
+                    { "SalaryRange", FormatSalary(job) },
+                    { "Currency", job.Currency },
+                    { "Country", job.Country },
                     { "ApplyUrl", job.ApplyUrl ?? "https://linkedin.com" },
+                    { "Benefits", job.Benefits ?? "" },
                     { "Explanation", explanation }
                 };
             }).OrderByDescending(jm => (int)jm["matchScore"]).ToList();
-
-            var liveJobMatches = new List<Dictionary<string, object>>();
-            try
-            {
-                int count = 0;
-                foreach (var searchLocation in liveMatchLocations)
-                {
-                    if (count >= 5) break;
-
-                    var apifyResults = await _apifyJobService.FetchJobsAsync(primaryQuerySkill, searchLocation, liveMatchCountry);
-
-                    foreach (var job in apifyResults)
-                    {
-                        if (count >= 5) break;
-
-                        int dynamicLiveScore = 95 - (count * 5);
-                        string matchedCsv = primaryQuerySkill.ToUpper();
-                        string explanation = "Live position correlated via Apify Job Scraper.";
-
-                        liveJobMatches.Add(new Dictionary<string, object> {
-                            { "matchScore", dynamicLiveScore },
-                            { "matchedSkills", matchedCsv },
-                            { "missingSkills", "NONE" },
-                            { "jobTitle", job.Title },
-                            { "companyName", job.CompanyName },
-                            { "jobLocation", job.Location },
-                            { "salaryRange", job.SalaryRange },
-                            { "applyUrl", job.ApplyUrl },
-                            { "explanation", explanation },
-                            { "MatchScore", dynamicLiveScore },
-                            { "MatchedSkills", matchedCsv },
-                            { "MissingSkills", "NONE" },
-                            { "JobTitle", job.Title },
-                            { "CompanyName", job.CompanyName },
-                            { "JobLocation", job.Location },
-                            { "SalaryRange", job.SalaryRange },
-                            { "ApplyUrl", job.ApplyUrl },
-                            { "Explanation", explanation }
-                        });
-                        count++;
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to connect or parse response from Apify Job Scraper within controller container context.");
-            }
-
-            allMatchedJobs.InsertRange(0, liveJobMatches);
 
             var frontendResponsePayload = new Dictionary<string, object>
             {
@@ -341,25 +295,112 @@ public class CandidateController : ControllerBase
         }
     }
 
+    private static string FormatSalary(Job job)
+    {
+        if (string.IsNullOrWhiteSpace(job.SalaryRange) || job.SalaryRange.Equals("NA", StringComparison.OrdinalIgnoreCase))
+        {
+            return "NA";
+        }
+
+        if (ContainsExplicitCurrencyMarker(job.SalaryRange))
+        {
+            return job.SalaryRange;
+        }
+
+        if (!string.IsNullOrWhiteSpace(job.Currency) && !job.SalaryRange.StartsWith(job.Currency, StringComparison.OrdinalIgnoreCase))
+        {
+            return $"{job.Currency} {job.SalaryRange}";
+        }
+
+        return job.SalaryRange;
+    }
+
     private List<string> ParseJobSkillsText(string description, string title)
     {
         var discovered = new List<string>();
         string combined = $"{title} {description}".ToLower();
 
-        var techDictionary = new List<string> { 
-            ".net", "c#", "python", "java", "javascript", "typescript", "sql", "sqlite", 
-            "postgresql", "docker", "aws", "azure", "git", "html", "css", "angular", "react" 
+        var techDictionary = new List<(string Needle, string Canonical)> {
+            ("azure devops", "AZURE"),
+            (".net8", ".NET"),
+            (".net 8", ".NET"),
+            (".net core", ".NET"),
+            ("asp.net", ".NET"),
+            ("azure", "AZURE"),
+            ("devops", "DEVOPS"),
+            ("c#", "C#"),
+            ("python", "PYTHON"),
+            ("java", "JAVA"),
+            ("javascript", "JAVASCRIPT"),
+            ("typescript", "TYPESCRIPT"),
+            ("sql", "SQL"),
+            ("sqlite", "SQLITE"),
+            ("postgresql", "POSTGRESQL"),
+            ("docker", "DOCKER"),
+            ("aws", "AWS"),
+            ("git", "GIT"),
+            ("html", "HTML"),
+            ("css", "CSS"),
+            ("angular", "ANGULAR"),
+            ("react", "REACT")
         };
 
         foreach (var tech in techDictionary)
         {
-            if (combined.Contains(tech))
+            if (combined.Contains(tech.Needle))
             {
-                discovered.Add(tech.ToUpper());
+                discovered.Add(tech.Canonical);
             }
         }
         
         if (!discovered.Any()) discovered.AddRange(new[] { ".NET", "C#", "SQL" });
         return discovered.Distinct().ToList();
+    }
+
+    private static bool MatchesJobByRoleOrSkills(Job job, bool hasExplicitRole, List<string> roleKeywords, List<string> normalizedCandidateSkills)
+    {
+        var jobText = $"{job.Title} {job.Description}";
+
+        if (hasExplicitRole)
+        {
+            return roleKeywords.Count == 0 || roleKeywords.Any(k => job.Title.Contains(k, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (normalizedCandidateSkills.Count > 0)
+        {
+            return normalizedCandidateSkills.Any(skill => jobText.Contains(skill, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return roleKeywords.Count == 0 || roleKeywords.Any(k => jobText.Contains(k, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static IEnumerable<string> ExpandSkillKeywords(string skill)
+    {
+        if (string.IsNullOrWhiteSpace(skill))
+        {
+            yield break;
+        }
+
+        var normalized = skill.Trim().ToLowerInvariant();
+
+        if (normalized.Contains("azure devops"))
+        {
+            yield return "azure";
+            yield return "devops";
+            yield break;
+        }
+
+        if (normalized.Contains(".net8") || normalized.Contains(".net 8") || normalized.Contains(".net core") || normalized.Contains("asp.net"))
+        {
+            yield return ".net";
+        }
+
+        yield return normalized;
+    }
+
+    private static bool ContainsExplicitCurrencyMarker(string salaryRange)
+    {
+        string[] markers = { "₹", "$", "€", "£", "rs", "inr", "usd", "eur", "gbp", "cad", "aud", "sgd", "aed", "jpy" };
+        return markers.Any(marker => salaryRange.Contains(marker, StringComparison.OrdinalIgnoreCase));
     }
 }

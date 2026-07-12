@@ -293,13 +293,15 @@
         function populateCountryDropdown() {
             const select = document.getElementById('prefCountry');
             select.innerHTML = '';
-            COUNTRIES.forEach(([code, name]) => {
+            [...COUNTRIES]
+                .sort((left, right) => left[1].localeCompare(right[1]))
+                .forEach(([code, name]) => {
                 const opt = document.createElement('option');
                 opt.value = code;
                 opt.textContent = `${code} (${name})`;
                 select.appendChild(opt);
             });
-            select.value = 'US';
+            select.value = 'IN';
         }
 
         function populateStatesDatalist(countryCode) {
@@ -308,7 +310,13 @@
             const states = STATES_BY_COUNTRY[countryCode];
             if (!states) return; // No predefined states for this country; fields stay free-text.
 
-            states.forEach(entry => {
+            [...states]
+                .sort((left, right) => {
+                    const leftName = Array.isArray(left) ? left[1] : left;
+                    const rightName = Array.isArray(right) ? right[1] : right;
+                    return leftName.localeCompare(rightName);
+                })
+                .forEach(entry => {
                 const opt = document.createElement('option');
                 if (Array.isArray(entry)) {
                     const [code, name] = entry;
