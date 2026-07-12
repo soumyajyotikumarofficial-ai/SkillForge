@@ -25,6 +25,7 @@ builder.Services.AddDbContext<SkillForgeDbContext>(options =>
 
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<AIService>();
+builder.Services.AddScoped<ApifyJobService>();
 
 // ===== AUTHENTICATION MIDDLEWARE SCHEMAS =====
 var jwtKey = builder.Configuration["Jwt:Key"] ?? "your-secret-key-must-be-at-least-32-characters-long-here!!!!";
@@ -102,8 +103,8 @@ using (var scope = app.Services.CreateScope())
         db.Database.EnsureCreated();
         logger.LogInformation("✅ Database initialized successfully");
 
-        // 2. Automatically trigger JSearch sync immediately on boot
-        logger.LogInformation("🚀 [STARTUP] Bootstrapping live JSearch synchronization pipeline...");
+        // 2. Automatically trigger Apify job sync immediately on boot
+        logger.LogInformation("🚀 [STARTUP] Bootstrapping live Apify Job Scraper synchronization pipeline...");
         var aiService = services.GetRequiredService<AIService>();
         await aiService.RefreshLiveJobBankAsync();
     }

@@ -1,4 +1,4 @@
 John Doe
 Software Engineer
 Experience with C#, .NET, ASP.NET, SQL, JavaScript, Angular
-Education: BSc Computer Science
+Education: Btech Computer Science

@@ -13,6 +13,7 @@ using Microsoft.Extensions.Configuration;
 using SkillForge.Models;
 using SkillForge.API.Services;
 using SkillForge.Data;
+using SkillForge.DTOs;
 
 namespace SkillForge.Controllers;
 
@@ -24,22 +25,30 @@ public class CandidateController : ControllerBase
     private readonly AIService _aiService;
     private readonly ILogger<CandidateController> _logger;
     private readonly IConfiguration _configuration;
-    private static readonly HttpClient _httpClient = new HttpClient();
+    private readonly ApifyJobService _apifyJobService;
 
     public CandidateController(
         SkillForgeDbContext dbContext, 
         AIService aiService, 
         ILogger<CandidateController> logger,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        ApifyJobService apifyJobService)
     {
         _dbContext = dbContext;
         _aiService = aiService;
         _logger = logger;
         _configuration = configuration;
+        _apifyJobService = apifyJobService;
     }
 
     [HttpPost("upload-resume")]
-    public async Task<IActionResult> AnalyzeResume(IFormFile file)
+    public async Task<IActionResult> AnalyzeResume(
+        IFormFile file,
+        [FromForm] string? country,
+        [FromForm] string? location1,
+        [FromForm] string? location2,
+        [FromForm] string? location3,
+        [FromForm] string? roleAspiration)
     {
         if (file == null || file.Length == 0)
         {
@@ -48,9 +57,21 @@ public class CandidateController : ControllerBase
         }
 
         _logger.LogInformation("Processing resume upload request: {FileName} ({Length} bytes)", file.FileName, file.Length);
-        
+
+        // Build optional job-hunt preferences from the submitted form fields. Location preferences
+        // are capped at 3, and role aspiration remains entirely optional (falls back to AI deduction).
+        var preferences = new JobHuntPreferences
+        {
+            Country = country,
+            RoleAspiration = roleAspiration,
+            LocationPreferences = new List<string?> { location1, location2, location3 }
+                .Where(l => !string.IsNullOrWhiteSpace(l))
+                .Select(l => l!.Trim())
+                .ToList()
+        };
+
         // 1. Invoke the service and receive the strongly-typed analysis object directly
-        var analysisResult = await _aiService.ProcessAndAnalyzeResumeAsync(file);
+        var analysisResult = await _aiService.ProcessAndAnalyzeResumeAsync(file, preferences);
         
         if (analysisResult == null || analysisResult.Candidate == null)
         {
@@ -133,7 +154,33 @@ public class CandidateController : ControllerBase
                 await _dbContext.SaveChangesAsync();
             }
 
-            var currentOpenJobs = await _dbContext.Jobs.ToListAsync();
+            // Resolve the target role query and location scope once, shared by both the local DB
+            // filter and the live Apify fetch below, so only relevant jobs are ever surfaced.
+            string primaryQuerySkill = preferences.HasRoleAspiration
+                ? preferences.RoleAspiration!.Trim()
+                : (localSkillNames.FirstOrDefault() ?? ".NET Developer");
+
+            string liveMatchCountry = !string.IsNullOrWhiteSpace(preferences.Country) ? preferences.Country!.Trim() : "US";
+            var liveMatchLocations = preferences.GetCleanLocations();
+            if (liveMatchLocations.Count == 0)
+            {
+                liveMatchLocations.Add("United States");
+            }
+
+            var roleKeywords = primaryQuerySkill
+                .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                .Where(k => k.Length > 2)
+                .ToList();
+
+            // Only surface jobs whose title relates to the target role AND whose location overlaps
+            // with one of the candidate's preferred locations — never the entire Jobs table.
+            var currentOpenJobs = (await _dbContext.Jobs.ToListAsync())
+                .Where(job =>
+                    (roleKeywords.Count == 0 || roleKeywords.Any(k => job.Title.Contains(k, StringComparison.OrdinalIgnoreCase)))
+                    && liveMatchLocations.Any(loc => job.Location.Contains(loc, StringComparison.OrdinalIgnoreCase) || loc.Contains(job.Location, StringComparison.OrdinalIgnoreCase))
+                )
+                .ToList();
+
             var existingMatchDictionary = await _dbContext.JobMatches
                 .Where(jm => jm.CandidateId == candidate.CandidateId)
                 .ToDictionaryAsync(jm => jm.JobId);
@@ -224,89 +271,48 @@ public class CandidateController : ControllerBase
             var liveJobMatches = new List<Dictionary<string, object>>();
             try
             {
-                string apiKey = _configuration["RapidAPI:Key"];
-                if (!string.IsNullOrEmpty(apiKey))
+                int count = 0;
+                foreach (var searchLocation in liveMatchLocations)
                 {
-                    string primaryQuerySkill = localSkillNames.FirstOrDefault() ?? ".NET Developer";
-                    
-                    var request = new HttpRequestMessage
+                    if (count >= 5) break;
+
+                    var apifyResults = await _apifyJobService.FetchJobsAsync(primaryQuerySkill, searchLocation, liveMatchCountry);
+
+                    foreach (var job in apifyResults)
                     {
-                        Method = HttpMethod.Get,
-                        RequestUri = new Uri($"https://jsearch.p.rapidapi.com/search-v2?query={Uri.EscapeDataString(primaryQuerySkill)}&page=1&num_pages=1"),
-                        Headers =
-                        {
-                            { "x-rapidapi-key", apiKey },
-                            { "x-rapidapi-host", "jsearch.p.rapidapi.com" },
-                        },
-                    };
+                        if (count >= 5) break;
 
-                    using var apiResponse = await _httpClient.SendAsync(request);
-                    if (apiResponse.IsSuccessStatusCode)
-                    {
-                        var jsonString = await apiResponse.Content.ReadAsStringAsync();
-                        _logger.LogInformation("=== RAW JSEARCH API RESPONSE (FROM CONTROLLER) ===\n{Response}", jsonString);
-                        using var apiDoc = JsonDocument.Parse(jsonString);
-                        
-                        // Defensive Parsing: Look for both "data" and "results" structural arrays reactively
-                        JsonElement resultsArray;
-                        bool foundArray = false;
+                        int dynamicLiveScore = 95 - (count * 5);
+                        string matchedCsv = primaryQuerySkill.ToUpper();
+                        string explanation = "Live position correlated via Apify Job Scraper.";
 
-                        if (apiDoc.RootElement.TryGetProperty("data", out resultsArray) && resultsArray.ValueKind == JsonValueKind.Array)
-                        {
-                            foundArray = true;
-                        }
-                        else if (apiDoc.RootElement.TryGetProperty("results", out resultsArray) && resultsArray.ValueKind == JsonValueKind.Array)
-                        {
-                            foundArray = true;
-                        }
-
-                        if (foundArray)
-                        {
-                            int count = 0;
-                            foreach (var job in resultsArray.EnumerateArray())
-                            {
-                                if (count >= 5) break;
-                                string title = (job.TryGetProperty("job_title", out var titleProp) ? titleProp.GetString() : null) ?? (job.TryGetProperty("title", out var t2) ? t2.GetString() : null) ?? "Job Position";
-                                string company = (job.TryGetProperty("employer_name", out var compProp) ? compProp.GetString() : null) ?? (job.TryGetProperty("company_name", out var c2) ? c2.GetString() : null) ?? "Unknown Employer";
-                                string loc = job.TryGetProperty("job_city", out var cityProp) ? cityProp.GetString() : "Remote / Global";
-                                string applyUrl = (job.TryGetProperty("job_apply_link", out var urlProp) ? urlProp.GetString() : null) ?? (job.TryGetProperty("apply_url", out var u2) ? u2.GetString() : null) ?? "#";
-                                
-                                int dynamicLiveScore = 95 - (count * 5);
-                                string matchedCsv = primaryQuerySkill.ToUpper();
-
-                                liveJobMatches.Add(new Dictionary<string, object> {
-                                    { "matchScore", dynamicLiveScore },
-                                    { "matchedSkills", matchedCsv },
-                                    { "missingSkills", "NONE" },
-                                    { "jobTitle", title },
-                                    { "companyName", company },
-                                    { "jobLocation", loc },
-                                    { "salaryRange", "Market Rate (Live)" },
-                                    { "applyUrl", applyUrl },
-                                    { "explanation", "Live position correlated via JSearch API." },
-                                    { "MatchScore", dynamicLiveScore },
-                                    { "MatchedSkills", matchedCsv },
-                                    { "MissingSkills", "NONE" },
-                                    { "JobTitle", title },
-                                    { "CompanyName", company },
-                                    { "JobLocation", loc },
-                                    { "SalaryRange", "Market Rate (Live)" },
-                                    { "ApplyUrl", applyUrl },
-                                    { "Explanation", "Live position correlated via JSearch API." }
-                                });
-                                count++;
-                            }
-                        }
-                        else
-                        {
-                            _logger.LogWarning("⚠️ [CONTROLLER JSEARCH] Inline search response body is missing both structural 'data' and 'results' property arrays.");
-                        }
+                        liveJobMatches.Add(new Dictionary<string, object> {
+                            { "matchScore", dynamicLiveScore },
+                            { "matchedSkills", matchedCsv },
+                            { "missingSkills", "NONE" },
+                            { "jobTitle", job.Title },
+                            { "companyName", job.CompanyName },
+                            { "jobLocation", job.Location },
+                            { "salaryRange", job.SalaryRange },
+                            { "applyUrl", job.ApplyUrl },
+                            { "explanation", explanation },
+                            { "MatchScore", dynamicLiveScore },
+                            { "MatchedSkills", matchedCsv },
+                            { "MissingSkills", "NONE" },
+                            { "JobTitle", job.Title },
+                            { "CompanyName", job.CompanyName },
+                            { "JobLocation", job.Location },
+                            { "SalaryRange", job.SalaryRange },
+                            { "ApplyUrl", job.ApplyUrl },
+                            { "Explanation", explanation }
+                        });
+                        count++;
                     }
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to connect or parse response from JSearch RapidAPI within controller container context.");
+                _logger.LogWarning(ex, "Failed to connect or parse response from Apify Job Scraper within controller container context.");
             }
 
             allMatchedJobs.InsertRange(0, liveJobMatches);

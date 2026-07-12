@@ -103,6 +103,13 @@
         .spinner { width: 20px; height: 20px; border: 3px solid rgba(255,255,255,0.3); border-radius: 50%; border-top-color: white; animation: spin 0.8s linear infinite; display: none; }
         .spinner.show { display: inline-block; }
         @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Job Hunt Preferences Form */
+        .pref-group { margin-bottom: 14px; }
+        .pref-group label { display: block; font-size: 12.5px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; }
+        .pref-input { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; background: #fff; color: var(--text-dark); }
+        .pref-input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1); }
+        .pref-locations-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
         
         @media(max-width: 960px) { .content-grid { grid-template-columns: 1fr; } .summary-header-row { grid-template-columns: 1fr; } .score-card, .details-card { height: auto; padding: 20px; } }
     </style>
@@ -131,6 +138,26 @@
                     <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Supports PDF, DOCX, TXT</p>
                     <input type="file" id="resumeInput" accept=".pdf,.docx,.txt" onchange="handleFileSelection(this)">
                     <div id="fileInfo" class="file-info"></div>
+                </div>
+
+                <div class="pref-group">
+                    <label for="prefCountry">Country</label>
+                    <select id="prefCountry" class="pref-input"></select>
+                </div>
+
+                <div class="pref-group">
+                    <label>Preferred Locations / States (up to 3)</label>
+                    <div class="pref-locations-row">
+                        <input type="text" id="prefLocation1" class="pref-input" list="countryStatesList" placeholder="Location 1" autocomplete="off">
+                        <input type="text" id="prefLocation2" class="pref-input" list="countryStatesList" placeholder="Location 2" autocomplete="off">
+                        <input type="text" id="prefLocation3" class="pref-input" list="countryStatesList" placeholder="Location 3" autocomplete="off">
+                    </div>
+                    <datalist id="countryStatesList"></datalist>
+                </div>
+
+                <div class="pref-group">
+                    <label for="prefRoleAspiration">Target Role Aspiration (optional)</label>
+                    <input type="text" id="prefRoleAspiration" class="pref-input" placeholder="Leave blank to auto-detect from resume">
                 </div>
 
                 <button id="analyzeBtn" class="action-btn" disabled onclick="triggerResumeAnalysis()">
@@ -193,6 +220,107 @@
         const BACKEND_PORTS = ['5123', '5000'];
         let selectedFile = null;
 
+        // ISO 3166-1 country codes + English short names (all recognized world countries).
+        const COUNTRIES = [
+            ["AF","Afghanistan"],["AL","Albania"],["DZ","Algeria"],["AD","Andorra"],["AO","Angola"],
+            ["AG","Antigua and Barbuda"],["AR","Argentina"],["AM","Armenia"],["AU","Australia"],["AT","Austria"],
+            ["AZ","Azerbaijan"],["BS","Bahamas"],["BH","Bahrain"],["BD","Bangladesh"],["BB","Barbados"],
+            ["BY","Belarus"],["BE","Belgium"],["BZ","Belize"],["BJ","Benin"],["BT","Bhutan"],
+            ["BO","Bolivia"],["BA","Bosnia and Herzegovina"],["BW","Botswana"],["BR","Brazil"],["BN","Brunei"],
+            ["BG","Bulgaria"],["BF","Burkina Faso"],["BI","Burundi"],["CV","Cabo Verde"],["KH","Cambodia"],
+            ["CM","Cameroon"],["CA","Canada"],["CF","Central African Republic"],["TD","Chad"],["CL","Chile"],
+            ["CN","China"],["CO","Colombia"],["KM","Comoros"],["CG","Congo"],["CD","Congo (DRC)"],
+            ["CR","Costa Rica"],["CI","Côte d'Ivoire"],["HR","Croatia"],["CU","Cuba"],["CY","Cyprus"],
+            ["CZ","Czechia"],["DK","Denmark"],["DJ","Djibouti"],["DM","Dominica"],["DO","Dominican Republic"],
+            ["EC","Ecuador"],["EG","Egypt"],["SV","El Salvador"],["GQ","Equatorial Guinea"],["ER","Eritrea"],
+            ["EE","Estonia"],["SZ","Eswatini"],["ET","Ethiopia"],["FJ","Fiji"],["FI","Finland"],
+            ["FR","France"],["GA","Gabon"],["GM","Gambia"],["GE","Georgia"],["DE","Germany"],
+            ["GH","Ghana"],["GR","Greece"],["GD","Grenada"],["GT","Guatemala"],["GN","Guinea"],
+            ["GW","Guinea-Bissau"],["GY","Guyana"],["HT","Haiti"],["HN","Honduras"],["HU","Hungary"],
+            ["IS","Iceland"],["IN","India"],["ID","Indonesia"],["IR","Iran"],["IQ","Iraq"],
+            ["IE","Ireland"],["IL","Israel"],["IT","Italy"],["JM","Jamaica"],["JP","Japan"],
+            ["JO","Jordan"],["KZ","Kazakhstan"],["KE","Kenya"],["KI","Kiribati"],["XK","Kosovo"],
+            ["KW","Kuwait"],["KG","Kyrgyzstan"],["LA","Laos"],["LV","Latvia"],["LB","Lebanon"],
+            ["LS","Lesotho"],["LR","Liberia"],["LY","Libya"],["LI","Liechtenstein"],["LT","Lithuania"],
+            ["LU","Luxembourg"],["MG","Madagascar"],["MW","Malawi"],["MY","Malaysia"],["MV","Maldives"],
+            ["ML","Mali"],["MT","Malta"],["MH","Marshall Islands"],["MR","Mauritania"],["MU","Mauritius"],
+            ["MX","Mexico"],["FM","Micronesia"],["MD","Moldova"],["MC","Monaco"],["MN","Mongolia"],
+            ["ME","Montenegro"],["MA","Morocco"],["MZ","Mozambique"],["MM","Myanmar"],["NA","Namibia"],
+            ["NR","Nauru"],["NP","Nepal"],["NL","Netherlands"],["NZ","New Zealand"],["NI","Nicaragua"],
+            ["NE","Niger"],["NG","Nigeria"],["KP","North Korea"],["MK","North Macedonia"],["NO","Norway"],
+            ["OM","Oman"],["PK","Pakistan"],["PW","Palau"],["PS","Palestine"],["PA","Panama"],
+            ["PG","Papua New Guinea"],["PY","Paraguay"],["PE","Peru"],["PH","Philippines"],["PL","Poland"],
+            ["PT","Portugal"],["QA","Qatar"],["RO","Romania"],["RU","Russia"],["RW","Rwanda"],
+            ["KN","Saint Kitts and Nevis"],["LC","Saint Lucia"],["VC","Saint Vincent and the Grenadines"],["WS","Samoa"],["SM","San Marino"],
+            ["ST","Sao Tome and Principe"],["SA","Saudi Arabia"],["SN","Senegal"],["RS","Serbia"],["SC","Seychelles"],
+            ["SL","Sierra Leone"],["SG","Singapore"],["SK","Slovakia"],["SI","Slovenia"],["SB","Solomon Islands"],
+            ["SO","Somalia"],["ZA","South Africa"],["KR","South Korea"],["SS","South Sudan"],["ES","Spain"],
+            ["LK","Sri Lanka"],["SD","Sudan"],["SR","Suriname"],["SE","Sweden"],["CH","Switzerland"],
+            ["SY","Syria"],["TW","Taiwan"],["TJ","Tajikistan"],["TZ","Tanzania"],["TH","Thailand"],
+            ["TL","Timor-Leste"],["TG","Togo"],["TO","Tonga"],["TT","Trinidad and Tobago"],["TN","Tunisia"],
+            ["TR","Turkey"],["TM","Turkmenistan"],["TV","Tuvalu"],["UG","Uganda"],["UA","Ukraine"],
+            ["AE","United Arab Emirates"],["GB","United Kingdom"],["US","United States"],["UY","Uruguay"],["UZ","Uzbekistan"],
+            ["VU","Vanuatu"],["VA","Vatican City"],["VE","Venezuela"],["VN","Vietnam"],["YE","Yemen"],
+            ["ZM","Zambia"],["ZW","Zimbabwe"]
+        ];
+
+        // States/provinces/regions keyed by country code. Entries are either "Name" strings or
+        // [code, name] pairs (when a widely recognized short code exists). Countries without an
+        // entry here simply leave the location fields as free-text inputs.
+        const STATES_BY_COUNTRY = {
+            US: [["AL","Alabama"],["AK","Alaska"],["AZ","Arizona"],["AR","Arkansas"],["CA","California"],["CO","Colorado"],["CT","Connecticut"],["DE","Delaware"],["FL","Florida"],["GA","Georgia"],["HI","Hawaii"],["ID","Idaho"],["IL","Illinois"],["IN","Indiana"],["IA","Iowa"],["KS","Kansas"],["KY","Kentucky"],["LA","Louisiana"],["ME","Maine"],["MD","Maryland"],["MA","Massachusetts"],["MI","Michigan"],["MN","Minnesota"],["MS","Mississippi"],["MO","Missouri"],["MT","Montana"],["NE","Nebraska"],["NV","Nevada"],["NH","New Hampshire"],["NJ","New Jersey"],["NM","New Mexico"],["NY","New York"],["NC","North Carolina"],["ND","North Dakota"],["OH","Ohio"],["OK","Oklahoma"],["OR","Oregon"],["PA","Pennsylvania"],["RI","Rhode Island"],["SC","South Carolina"],["SD","South Dakota"],["TN","Tennessee"],["TX","Texas"],["UT","Utah"],["VT","Vermont"],["VA","Virginia"],["WA","Washington"],["WV","West Virginia"],["WI","Wisconsin"],["WY","Wyoming"],["DC","District of Columbia"]],
+            CA: [["AB","Alberta"],["BC","British Columbia"],["MB","Manitoba"],["NB","New Brunswick"],["NL","Newfoundland and Labrador"],["NS","Nova Scotia"],["NT","Northwest Territories"],["NU","Nunavut"],["ON","Ontario"],["PE","Prince Edward Island"],["QC","Quebec"],["SK","Saskatchewan"],["YT","Yukon"]],
+            IN: ["Andhra Pradesh","Arunachal Pradesh","Assam","Bihar","Chhattisgarh","Goa","Gujarat","Haryana","Himachal Pradesh","Jharkhand","Karnataka","Kerala","Madhya Pradesh","Maharashtra","Manipur","Meghalaya","Mizoram","Nagaland","Odisha","Punjab","Rajasthan","Sikkim","Tamil Nadu","Telangana","Tripura","Uttar Pradesh","Uttarakhand","West Bengal","Andaman and Nicobar Islands","Chandigarh","Dadra and Nagar Haveli and Daman and Diu","Delhi","Jammu and Kashmir","Ladakh","Lakshadweep","Puducherry"],
+            AU: [["NSW","New South Wales"],["QLD","Queensland"],["SA","South Australia"],["TAS","Tasmania"],["VIC","Victoria"],["WA","Western Australia"],["ACT","Australian Capital Territory"],["NT","Northern Territory"]],
+            GB: ["England","Scotland","Wales","Northern Ireland"],
+            DE: ["Baden-Württemberg","Bavaria","Berlin","Brandenburg","Bremen","Hamburg","Hesse","Lower Saxony","Mecklenburg-Vorpommern","North Rhine-Westphalia","Rhineland-Palatinate","Saarland","Saxony","Saxony-Anhalt","Schleswig-Holstein","Thuringia"],
+            FR: ["Auvergne-Rhône-Alpes","Bourgogne-Franche-Comté","Brittany","Centre-Val de Loire","Corsica","Grand Est","Hauts-de-France","Île-de-France","Normandy","Nouvelle-Aquitaine","Occitanie","Pays de la Loire","Provence-Alpes-Côte d'Azur"],
+            BR: [["AC","Acre"],["AL","Alagoas"],["AP","Amapá"],["AM","Amazonas"],["BA","Bahia"],["CE","Ceará"],["DF","Distrito Federal"],["ES","Espírito Santo"],["GO","Goiás"],["MA","Maranhão"],["MT","Mato Grosso"],["MS","Mato Grosso do Sul"],["MG","Minas Gerais"],["PA","Pará"],["PB","Paraíba"],["PR","Paraná"],["PE","Pernambuco"],["PI","Piauí"],["RJ","Rio de Janeiro"],["RN","Rio Grande do Norte"],["RS","Rio Grande do Sul"],["RO","Rondônia"],["RR","Roraima"],["SC","Santa Catarina"],["SP","São Paulo"],["SE","Sergipe"],["TO","Tocantins"]],
+            MX: ["Aguascalientes","Baja California","Baja California Sur","Campeche","Chiapas","Chihuahua","Coahuila","Colima","Durango","Guanajuato","Guerrero","Hidalgo","Jalisco","México State","Mexico City","Michoacán","Morelos","Nayarit","Nuevo León","Oaxaca","Puebla","Querétaro","Quintana Roo","San Luis Potosí","Sinaloa","Sonora","Tabasco","Tamaulipas","Tlaxcala","Veracruz","Yucatán","Zacatecas"],
+            CN: ["Beijing","Shanghai","Tianjin","Chongqing","Guangdong","Jiangsu","Zhejiang","Shandong","Henan","Sichuan","Hubei","Hunan","Anhui","Hebei","Fujian","Shaanxi","Liaoning","Jiangxi","Yunnan","Guangxi","Shanxi","Heilongjiang","Guizhou","Gansu","Jilin","Xinjiang","Inner Mongolia","Hainan","Ningxia","Qinghai","Tibet","Hong Kong","Macau"],
+            NG: ["Abia","Adamawa","Akwa Ibom","Anambra","Bauchi","Bayelsa","Benue","Borno","Cross River","Delta","Ebonyi","Edo","Ekiti","Enugu","Gombe","Imo","Jigawa","Kaduna","Kano","Katsina","Kebbi","Kogi","Kwara","Lagos","Nasarawa","Niger","Ogun","Ondo","Osun","Oyo","Plateau","Rivers","Sokoto","Taraba","Yobe","Zamfara","Federal Capital Territory"],
+            ZA: ["Eastern Cape","Free State","Gauteng","KwaZulu-Natal","Limpopo","Mpumalanga","North West","Northern Cape","Western Cape"],
+            PK: ["Punjab","Sindh","Khyber Pakhtunkhwa","Balochistan","Gilgit-Baltistan","Azad Kashmir","Islamabad Capital Territory"],
+            PH: ["Ilocos Region","Cagayan Valley","Central Luzon","Calabarzon","Mimaropa","Bicol Region","Western Visayas","Central Visayas","Eastern Visayas","Zamboanga Peninsula","Northern Mindanao","Davao Region","Soccsksargen","Caraga","Bangsamoro","Cordillera Administrative Region","National Capital Region"],
+            IT: ["Abruzzo","Aosta Valley","Apulia","Basilicata","Calabria","Campania","Emilia-Romagna","Friuli-Venezia Giulia","Lazio","Liguria","Lombardy","Marche","Molise","Piedmont","Sardinia","Sicily","Trentino-Alto Adige","Tuscany","Umbria","Veneto"],
+            ES: ["Andalusia","Aragon","Asturias","Balearic Islands","Basque Country","Canary Islands","Cantabria","Castile and León","Castilla-La Mancha","Catalonia","Extremadura","Galicia","La Rioja","Madrid","Murcia","Navarre","Valencian Community","Ceuta","Melilla"],
+            JP: ["Hokkaido","Aomori","Iwate","Miyagi","Akita","Yamagata","Fukushima","Ibaraki","Tochigi","Gunma","Saitama","Chiba","Tokyo","Kanagawa","Niigata","Toyama","Ishikawa","Fukui","Yamanashi","Nagano","Gifu","Shizuoka","Aichi","Mie","Shiga","Kyoto","Osaka","Hyogo","Nara","Wakayama","Tottori","Shimane","Okayama","Hiroshima","Yamaguchi","Tokushima","Kagawa","Ehime","Kochi","Fukuoka","Saga","Nagasaki","Kumamoto","Oita","Miyazaki","Kagoshima","Okinawa"],
+            AE: ["Abu Dhabi","Ajman","Dubai","Fujairah","Ras Al Khaimah","Sharjah","Umm Al Quwain"],
+            NZ: ["Auckland","Bay of Plenty","Canterbury","Gisborne","Hawke's Bay","Manawatu-Whanganui","Marlborough","Nelson","Northland","Otago","Southland","Taranaki","Tasman","Waikato","Wellington","West Coast"],
+            IE: ["Carlow","Cavan","Clare","Cork","Donegal","Dublin","Galway","Kerry","Kildare","Kilkenny","Laois","Leitrim","Limerick","Longford","Louth","Mayo","Meath","Monaghan","Offaly","Roscommon","Sligo","Tipperary","Waterford","Westmeath","Wexford","Wicklow"]
+        };
+
+        function populateCountryDropdown() {
+            const select = document.getElementById('prefCountry');
+            select.innerHTML = '';
+            COUNTRIES.forEach(([code, name]) => {
+                const opt = document.createElement('option');
+                opt.value = code;
+                opt.textContent = `${code} (${name})`;
+                select.appendChild(opt);
+            });
+            select.value = 'US';
+        }
+
+        function populateStatesDatalist(countryCode) {
+            const datalist = document.getElementById('countryStatesList');
+            datalist.innerHTML = '';
+            const states = STATES_BY_COUNTRY[countryCode];
+            if (!states) return; // No predefined states for this country; fields stay free-text.
+
+            states.forEach(entry => {
+                const opt = document.createElement('option');
+                if (Array.isArray(entry)) {
+                    const [code, name] = entry;
+                    opt.value = name;
+                    opt.label = `${code} - ${name}`;
+                } else {
+                    opt.value = entry;
+                }
+                datalist.appendChild(opt);
+            });
+        }
+
         window.addEventListener('DOMContentLoaded', () => {
             const token = localStorage.getItem('token');
             const username = localStorage.getItem('username');
@@ -206,6 +334,12 @@
 
             document.getElementById('navUsername').textContent = username;
             document.getElementById('welcomeName').textContent = username;
+
+            populateCountryDropdown();
+            populateStatesDatalist(document.getElementById('prefCountry').value);
+            document.getElementById('prefCountry').addEventListener('change', (e) => {
+                populateStatesDatalist(e.target.value);
+            });
 
             initDragAndDrop();
         });
@@ -267,6 +401,11 @@
 
             const formData = new FormData();
             formData.append('file', selectedFile);
+            formData.append('country', document.getElementById('prefCountry').value.trim() || 'US');
+            formData.append('location1', document.getElementById('prefLocation1').value.trim());
+            formData.append('location2', document.getElementById('prefLocation2').value.trim());
+            formData.append('location3', document.getElementById('prefLocation3').value.trim());
+            formData.append('roleAspiration', document.getElementById('prefRoleAspiration').value.trim());
 
             let responseSuccess = false;
             let outputText = "";

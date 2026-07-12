@@ -60,6 +60,8 @@ public class Job
     public string SalaryRange { get; set; } = "";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public string ApplyUrl { get; set; } = "";
+    public string Country { get; set; } = "";
+    public string Benefits { get; set; } = ""; // Flattened, comma-separated list of job benefits
     
     public virtual ICollection<JobSkill> RequiredSkills { get; set; } = new List<JobSkill>();
     public virtual ICollection<JobMatch> Matches { get; set; } = new List<JobMatch>();

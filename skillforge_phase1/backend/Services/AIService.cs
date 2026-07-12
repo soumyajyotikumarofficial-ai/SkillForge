@@ -13,6 +13,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
 using SkillForge.Data;
 using SkillForge.Models;
+using SkillForge.DTOs;
 
 namespace SkillForge.API.Services;
 
@@ -41,21 +42,25 @@ public class AIService
     private readonly IConfiguration _config;
     private readonly ILogger<AIService> _logger;
     private readonly SkillForgeDbContext _dbContext;
+    private readonly ApifyJobService _apifyJobService;
 
-    public AIService(IHttpClientFactory httpFactory, IConfiguration config, ILogger<AIService> logger, SkillForgeDbContext dbContext)
+    public AIService(IHttpClientFactory httpFactory, IConfiguration config, ILogger<AIService> logger, SkillForgeDbContext dbContext, ApifyJobService apifyJobService)
     {
         _httpFactory = httpFactory;
         _config = config;
         _logger = logger;
         _dbContext = dbContext;
+        _apifyJobService = apifyJobService;
     }
 
     /// <summary>
-    /// Unified entry-point: Parses the resume via Gemini first, matches targeted role keywords, 
-    /// and invokes the JSearch sync engine using the dynamically derived target query.
+    /// Unified entry-point: Parses the resume via Gemini first, matches targeted role keywords
+    /// (unless an explicit <paramref name="preferences"/> role aspiration is supplied), 
+    /// and invokes the Apify Job Scraper sync engine using the dynamically derived target query
+    /// across up to 3 candidate-supplied location preferences.
     /// Returns null if the parsing or processing pipeline encounters an error.
     /// </summary>
-    public async Task<ResumeAnalysisResult?> ProcessAndAnalyzeResumeAsync(IFormFile file)
+    public async Task<ResumeAnalysisResult?> ProcessAndAnalyzeResumeAsync(IFormFile file, JobHuntPreferences? preferences = null)
     {
         if (file == null || file.Length == 0)
         {
@@ -106,17 +111,40 @@ public class AIService
                 return null;
             }
 
-            string extractedRole = analysisResult.Candidate.Role;
-            _logger.LogInformation("🔍 [ROLE DEDUCTION] AI determined candidate role title: '{Role}'", extractedRole);
+            string searchJobQuery;
 
-            // 2. Isolate the target keyword phrase (developer/tester/engineer) and what comes before it
-            var match = Regex.Match(extractedRole, @".*?\b(developer|tester|engineer)\b", RegexOptions.IgnoreCase);
-            
-            string searchJobQuery = match.Success ? match.Value.Trim() : extractedRole.Trim();
-            _logger.LogInformation("🎯 [QUERY MATCH] Formulated JSearch query string: '{Query}'", searchJobQuery);
+            // If the candidate explicitly supplied a role aspiration, honor it directly and skip AI role deduction.
+            if (preferences != null && preferences.HasRoleAspiration)
+            {
+                searchJobQuery = preferences.RoleAspiration!.Trim();
+                _logger.LogInformation("🎯 [ROLE ASPIRATION] Using candidate-supplied target role: '{Role}'", searchJobQuery);
+            }
+            else
+            {
+                string extractedRole = analysisResult.Candidate.Role;
+                _logger.LogInformation("🔍 [ROLE DEDUCTION] AI determined candidate role title: '{Role}'", extractedRole);
 
-            // 3. Synchronize live job rows matching the tailored query term exclusively
-            await RefreshLiveJobBankAsync(searchJobQuery);
+                // Isolate the target keyword phrase (developer/tester/engineer) and what comes before it
+                var match = Regex.Match(extractedRole, @".*?\b(developer|tester|engineer)\b", RegexOptions.IgnoreCase);
+
+                searchJobQuery = match.Success ? match.Value.Trim() : extractedRole.Trim();
+                _logger.LogInformation("🎯 [QUERY MATCH] Formulated Apify actor query string: '{Query}'", searchJobQuery);
+            }
+
+            // 2. Determine which locations to search against. Default behavior (no preferences supplied)
+            // is preserved: a single sync run against the default location/country.
+            string country = !string.IsNullOrWhiteSpace(preferences?.Country) ? preferences!.Country!.Trim() : "US";
+            var locations = preferences?.GetCleanLocations() ?? new List<string>();
+            if (locations.Count == 0)
+            {
+                locations.Add("United States");
+            }
+
+            // 3. Synchronize live job rows matching the tailored query term across each preferred location
+            foreach (var location in locations)
+            {
+                await RefreshLiveJobBankAsync(searchJobQuery, location, country);
+            }
 
             return analysisResult;
         }
@@ -322,120 +350,56 @@ Resume Text to Repair and Parse:
     }
 
     /// <summary>
-    /// Exclusively requests live roles from the JSearch API platform using the dynamically isolated query parameter.
+    /// Exclusively requests live roles from the Apify Job Scraper actor using the dynamically isolated query parameter.
     /// </summary>
     public async Task RefreshLiveJobBankAsync(string searchQuery)
     {
+        await RefreshLiveJobBankAsync(searchQuery, "United States", "US");
+    }
+
+    /// <summary>
+    /// Requests live roles from the Apify Job Scraper actor for a specific target query, location and country
+    /// (e.g. as supplied via candidate job-hunt preferences), applying strict Title+Company+Location de-duplication.
+    /// </summary>
+    public async Task RefreshLiveJobBankAsync(string searchQuery, string location, string country)
+    {
         try
         {
-            _logger.LogInformation("🔄 [JSEARCH] Initializing live synchronization process...");
-            
-            var apiKey = _config["RapidAPI:Key"];
-            var apiHost = _config["RapidAPI:ApiHost"] ?? "jsearch.p.rapidapi.com";
+            var apifyJobs = await _apifyJobService.FetchJobsAsync(searchQuery, location, country);
 
-            if (string.IsNullOrWhiteSpace(apiKey))
+            _logger.LogInformation("📊 [APIFY] Extracted [{Count}] live jobs matching query variant: '{Query}' in '{Location}, {Country}'", apifyJobs.Count, searchQuery, location, country);
+
+            if (apifyJobs.Count == 0)
             {
-                _logger.LogError("❌ [JSEARCH] Configuration Error: 'RapidAPI:Key' is empty or missing. Aborting synchronization.");
-                return;
-            }
-
-            var client = _httpFactory.CreateClient();
-            
-            client.DefaultRequestHeaders.Add("x-rapidapi-key", apiKey);
-            client.DefaultRequestHeaders.Add("x-rapidapi-host", apiHost);
-            client.DefaultRequestHeaders.UserAgent.ParseAdd("SkillForgeAPI/1.0");
-
-            var requestUrl = $"https://{apiHost}/search-v2?query={Uri.EscapeDataString(searchQuery)}&num_pages=1&country=us&date_posted=all";
-            _logger.LogInformation("🌐 [JSEARCH] Dispatching query to API URL: {Url}", requestUrl);
-
-            var apiResponse = await client.GetAsync(requestUrl);
-            
-            if (!apiResponse.IsSuccessStatusCode)
-            {
-                string errorBody = await apiResponse.Content.ReadAsStringAsync();
-                _logger.LogError("❌ [JSEARCH] API Request Rejected. Status Code: {Code}, Server Message: {Message}", apiResponse.StatusCode, errorBody);
-                return;
-            }
-
-            string rawJsonData = await apiResponse.Content.ReadAsStringAsync();
-            _logger.LogInformation("=== RAW JSEARCH API RESPONSE (FROM SERVICE) ===\n{Response}", rawJsonData);
-            using var document = JsonDocument.Parse(rawJsonData);
-            
-            JsonElement jobsArray = default;
-            bool foundJobArray = false;
-
-            if (document.RootElement.TryGetProperty("data", out var dataElement))
-            {
-                if (dataElement.ValueKind == JsonValueKind.Object && dataElement.TryGetProperty("jobs", out var innerJobs) && innerJobs.ValueKind == JsonValueKind.Array)
-                {
-                    jobsArray = innerJobs;
-                    foundJobArray = true;
-                }
-                else if (dataElement.ValueKind == JsonValueKind.Array)
-                {
-                    jobsArray = dataElement;
-                    foundJobArray = true;
-                }
-            }
-            else if (document.RootElement.TryGetProperty("results", out var resultsElement) && resultsElement.ValueKind == JsonValueKind.Array)
-            {
-                jobsArray = resultsElement;
-                foundJobArray = true;
-            }
-
-            if (!foundJobArray)
-            {
-                _logger.LogError("❌ [JSEARCH DETAILED ERROR] Root job array ('data' or 'results') is missing or malformed.\n🔴 RAW PAYLOAD FROM SERVER:\n{RawJson}", rawJsonData);
-                return;
-            }
-
-            int totalPayloadJobs = jobsArray.GetArrayLength();
-            _logger.LogInformation("📊 [JSEARCH] Connection Verified. Extracted [{Count}] live jobs matching query variant: '{Query}'", totalPayloadJobs, searchQuery);
-
-            if (totalPayloadJobs == 0)
-            {
-                _logger.LogWarning("⚠️ [JSEARCH] The API returned a success status code but zero matching records were found for query: '{Terms}'", searchQuery);
+                _logger.LogWarning("⚠️ [APIFY] The actor run returned zero matching records for query: '{Terms}'", searchQuery);
                 return;
             }
 
             int ingestedCounter = 0;
             int skippedCounter = 0;
 
+            // Strict de-duplication requires evaluating Title, CompanyName, AND Location together.
             var existingJobs = await _dbContext.Jobs
-                .Select(j => new { Title = j.Title.Trim(), CompanyName = j.CompanyName.Trim() })
+                .Select(j => new { Title = j.Title.Trim(), CompanyName = j.CompanyName.Trim(), Location = j.Location.Trim() })
                 .ToListAsync();
 
             _logger.LogInformation("🗄️ [LOCAL DB] Found {Count} total pre-existing items in local SQLite cache.", existingJobs.Count);
 
-            foreach (var externalJob in jobsArray.EnumerateArray())
+            foreach (var externalJob in apifyJobs)
             {
-                string title = (externalJob.TryGetProperty("job_title", out var t) ? t.GetString() : null) 
-                            ?? (externalJob.TryGetProperty("title", out var t2) ? t2.GetString() : null) 
-                            ?? "Unknown Position";
+                string title = externalJob.Title.Trim();
+                string company = externalJob.CompanyName.Trim();
+                string jobLocation = externalJob.Location.Trim();
 
-                string company = (externalJob.TryGetProperty("employer_name", out var c) ? c.GetString() : null) 
-                              ?? (externalJob.TryGetProperty("company_name", out var c2) ? c2.GetString() : null) 
-                              ?? "Unknown Company";
+                _logger.LogInformation("📥 [APIFY EVALUATION] Examining item row: '{Title}' at '{Company}' ({Location})...", title, company, jobLocation);
 
-                string description = (externalJob.TryGetProperty("job_description", out var d) ? d.GetString() : null) 
-                                  ?? (externalJob.TryGetProperty("description", out var d2) ? d2.GetString() : null) 
-                                  ?? "";
-                
-                string city = externalJob.TryGetProperty("job_city", out var ct) ? ct.GetString() : null;
-                string country = externalJob.TryGetProperty("job_country", out var cn) ? cn.GetString() : null;
-                string location = (!string.IsNullOrEmpty(city) && !string.IsNullOrEmpty(country)) ? $"{city}, {country}" : (city ?? country ?? "Remote");
+                bool jobExists = existingJobs.Any(ej => ej.Title.Equals(title, StringComparison.OrdinalIgnoreCase)
+                                                     && ej.CompanyName.Equals(company, StringComparison.OrdinalIgnoreCase)
+                                                     && ej.Location.Equals(jobLocation, StringComparison.OrdinalIgnoreCase));
 
-                title = title.Trim();
-                company = company.Trim();
-
-                _logger.LogInformation("📥 [JSEARCH EVALUATION] Examining item row: '{Title}' at '{Company}'...", title, company);
-
-                bool jobExists = existingJobs.Any(ej => ej.Title.Equals(title, StringComparison.OrdinalIgnoreCase) 
-                                                     && ej.CompanyName.Equals(company, StringComparison.OrdinalIgnoreCase));
-                
                 if (jobExists)
                 {
-                    _logger.LogInformation("⏭️ [JSEARCH SKIP] Record variant already caught in indexing tables. Dropping row entry.");
+                    _logger.LogInformation("⏭️ [APIFY SKIP] Record variant already caught in indexing tables. Dropping row entry.");
                     skippedCounter++;
                     continue;
                 }
@@ -444,37 +408,21 @@ Resume Text to Repair and Parse:
                 {
                     Title = title,
                     CompanyName = company,
-                    Location = location,
-                    SalaryRange = "Competitive / Market Rate", 
-                    Description = description,
+                    Location = jobLocation,
+                    Country = externalJob.Country,
+                    SalaryRange = string.IsNullOrWhiteSpace(externalJob.SalaryRange) ? "Competitive / Market Rate" : externalJob.SalaryRange,
+                    Description = externalJob.Description,
+                    ApplyUrl = externalJob.ApplyUrl,
+                    Benefits = externalJob.Benefits,
                     CreatedAt = DateTime.UtcNow,
-                    RequiredSkills = new List<JobSkill>() 
+                    RequiredSkills = new List<JobSkill>()
                 };
 
-                if (externalJob.TryGetProperty("job_highlights", out var highlightsObj) && highlightsObj.ValueKind == JsonValueKind.Object)
-                {
-                    if (highlightsObj.TryGetProperty("Qualifications", out var qualificationsArray) && qualificationsArray.ValueKind == JsonValueKind.Array)
-                    {
-                        foreach (var qualificationElement in qualificationsArray.EnumerateArray())
-                        {
-                            var qualificationString = qualificationElement.GetString();
-                            if (!string.IsNullOrWhiteSpace(qualificationString))
-                            {
-                                var skillTag = qualificationString.Length > 50 ? qualificationString.Substring(0, 47) + "..." : qualificationString;
-                                newJobRecord.RequiredSkills.Add(new JobSkill
-                                {
-                                    SkillName = skillTag.Trim()
-                                });
-                            }
-                        }
-                    }
-                }
-
                 _dbContext.Jobs.Add(newJobRecord);
-                existingJobs.Add(new { Title = title, CompanyName = company });
+                existingJobs.Add(new { Title = title, CompanyName = company, Location = jobLocation });
                 ingestedCounter++;
-                
-                _logger.LogInformation("✅ [JSEARCH STAGE] Successfully added '{Title}' by '{Company}' to tracking context batch.", title, company);
+
+                _logger.LogInformation("✅ [APIFY STAGE] Successfully added '{Title}' by '{Company}' to tracking context batch.", title, company);
             }
 
             if (ingestedCounter > 0)
@@ -483,11 +431,11 @@ Resume Text to Repair and Parse:
                 await _dbContext.SaveChangesAsync();
             }
 
-            _logger.LogInformation("🚀 [JSEARCH PROCESS COMPLETE] Loop finished. Ingested completely fresh unique items: {Ingested}. Duplicates skipped: {Skipped}.", ingestedCounter, skippedCounter);
+            _logger.LogInformation("🚀 [APIFY PROCESS COMPLETE] Loop finished. Ingested completely fresh unique items: {Ingested}. Duplicates skipped: {Skipped}.", ingestedCounter, skippedCounter);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ [JSEARCH CRITICAL FAILURE] Thread aborted due to an internal execution crash.");
+            _logger.LogError(ex, "❌ [APIFY CRITICAL FAILURE] Thread aborted due to an internal execution crash.");
         }
     }
 
