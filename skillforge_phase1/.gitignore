@@ -37,3 +37,12 @@ backend/Uploads/Resumes/
 # IDE
 .vscode/
 .idea/
+
+# Local SQLite DB
+*.db
+*.db-shm
+*.db-wal
+
+# Tokens / secrets
+*_token.txt
+job_post_result.json

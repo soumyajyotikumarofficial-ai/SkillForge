@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using System.Net;
+using System.Net.Sockets;
 using System.Text;
 using SkillForge.Data;
 using SkillForge.API.Services;
@@ -8,11 +10,36 @@ using SkillForge.API.Services;
 var builder = WebApplication.CreateBuilder(args);
 
 // ===== ENFORCE SYSTEM NETWORK BINDING HUB =====
+var desiredPorts = new[] { 5123, 7123, 5000 };
+var availablePorts = desiredPorts.Where(IsPortAvailable).ToArray();
+
+if (!availablePorts.Any())
+{
+    throw new InvalidOperationException("No configured backend ports are available. Ensure one of 5123, 7123, or 5000 is free before starting the backend.");
+}
+
 builder.WebHost.ConfigureKestrel(options =>
 {
-    options.ListenLocalhost(5123, listenOptions => listenOptions.UseHttps());
-    options.ListenLocalhost(5000);
+    foreach (var port in availablePorts)
+    {
+        options.ListenLocalhost(port);
+    }
 });
+
+static bool IsPortAvailable(int port)
+{
+    try
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, port);
+        listener.Start();
+        listener.Stop();
+        return true;
+    }
+    catch (SocketException)
+    {
+        return false;
+    }
+}
 
 // ===== REGISTER MVC FRAMEWORK ENGINE BINDINGS =====
 builder.Services.AddControllers();
@@ -28,6 +55,13 @@ builder.Services.AddScoped<AIService>();
 builder.Services.AddScoped<ApifyJobService>();
 builder.Services.AddSingleton<LiveJobFetcherService>();
 builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<LiveJobFetcherService>());
+
+// ===== RECRUITER PORTAL AI & NOTIFICATION SERVICES (Feature 5) =====
+builder.Services.AddScoped<RecruiterAIService>();
+builder.Services.AddScoped<ICompanyDescriptionService>(sp => sp.GetRequiredService<RecruiterAIService>());
+builder.Services.AddScoped<IProjectTeamPlannerService>(sp => sp.GetRequiredService<RecruiterAIService>());
+builder.Services.AddScoped<ICandidateMatchingService>(sp => sp.GetRequiredService<RecruiterAIService>());
+builder.Services.AddScoped<IEmailNotificationService, EmailNotificationService>();
 
 // ===== AUTHENTICATION MIDDLEWARE SCHEMAS =====
 var jwtKey = builder.Configuration["Jwt:Key"] ?? "your-secret-key-must-be-at-least-32-characters-long-here!!!!";
@@ -51,6 +85,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     });
 
 // ===== CROSS ORIGIN COMPONENT POOL SETUP =====
+builder.Services.AddAuthorization();
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
@@ -101,8 +136,8 @@ using (var scope = app.Services.CreateScope())
     
     try
     {
-        // 1. Ensure DB exists
-        db.Database.EnsureCreated();
+        // Apply pending migrations instead of EnsureCreated so schema changes reach the existing db file.
+        db.Database.Migrate();
         logger.LogInformation("✅ Database initialized successfully");
     }
     catch (Exception ex)

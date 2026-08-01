@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SkillForge - Recruiter Dashboard</title>
+    <style>
+        :root {
+            --primary: #4f46e5;
+            --primary-hover: #4338ca;
+            --bg-main: #f8fafc;
+            --bg-card: #ffffff;
+            --text-dark: #0f172a;
+            --text-muted: #64748b;
+            --border: #e2e8f0;
+            --success: #10b981;
+            --accent: #f1f5f9;
+            --danger: #ef4444;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg-main); color: var(--text-dark); -webkit-font-smoothing: antialiased; }
+
+        .navbar { background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); color: white; padding: 16px 40px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 20px rgba(79, 70, 229, 0.15); }
+        .navbar h1 { font-size: 24px; font-weight: 700; letter-spacing: -0.5px; }
+        .user-profile { display: flex; align-items: center; gap: 20px; }
+        .logout-btn { background: rgba(255, 255, 255, 0.15); color: white; border: 1px solid rgba(255,255,255,0.3); padding: 8px 18px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 14px; transition: all 0.2s; }
+        .logout-btn:hover { background: white; color: var(--primary); border-color: white; }
+
+        .dashboard-container { max-width: 1300px; margin: 40px auto; padding: 0 24px; }
+        .welcome-card { background: var(--bg-card); padding: 28px; border-radius: 16px; border: 1px solid var(--border); box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 32px; }
+        .welcome-card h2 { font-size: 26px; font-weight: 700; color: var(--text-dark); margin-bottom: 6px; }
+        .welcome-card p { color: var(--text-muted); font-size: 15px; }
+
+        .content-grid { display: grid; grid-template-columns: 1fr 1.4fr; gap: 32px; align-items: start; }
+        .panel { background: var(--bg-card); padding: 32px; border-radius: 16px; border: 1px solid var(--border); box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); margin-bottom: 32px; }
+        .panel h3 { font-size: 18px; font-weight: 700; color: var(--text-dark); margin-bottom: 20px; border-left: 4px solid var(--primary); padding-left: 10px; }
+
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; font-size: 12.5px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; }
+        .form-input, .form-textarea, select.form-input { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; background: #fff; color: var(--text-dark); font-family: inherit; }
+        .form-input:focus, .form-textarea:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1); }
+        .form-textarea { min-height: 90px; resize: vertical; }
+        .checkbox-row { display: flex; gap: 16px; flex-wrap: wrap; }
+        .checkbox-row label { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; color: var(--text-dark); }
+
+        .action-btn { background: var(--primary); color: white; border: none; padding: 14px 28px; border-radius: 10px; font-size: 16px; font-weight: 600; cursor: pointer; width: 100%; transition: background-color 0.2s; display: flex; justify-content: center; align-items: center; gap: 10px; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.2); }
+        .action-btn:hover { background: var(--primary-hover); }
+        .action-btn:disabled { background: #cbd5e1; box-shadow: none; cursor: not-allowed; }
+        .secondary-btn { background: var(--accent); color: var(--primary); border: 1px solid var(--border); padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; }
+        .secondary-btn:hover { background: #e0e7ff; }
+
+        .spinner { width: 18px; height: 18px; border: 3px solid rgba(255,255,255,0.3); border-radius: 50%; border-top-color: white; animation: spin 0.8s linear infinite; display: none; }
+        .spinner.show { display: inline-block; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .error-message { color: var(--danger); font-size: 12.5px; margin-top: 4px; display: none; }
+        .error-message.show { display: block; }
+        .success-banner { background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; padding: 14px 16px; border-radius: 10px; font-size: 13.5px; margin-bottom: 16px; display: none; line-height: 1.5; }
+        .success-banner.show { display: block; }
+
+        .jobs-list { display: flex; flex-direction: column; gap: 14px; }
+        .job-card { border: 1px solid var(--border); background: #fff; padding: 18px; border-radius: 12px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.02); }
+        .job-card-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+        .job-card-header h4 { font-size: 15.5px; font-weight: 700; color: var(--text-dark); }
+        .job-card-header p { font-size: 12.5px; color: var(--text-muted); margin-top: 2px; }
+        .job-card-meta { font-size: 11.5px; color: var(--text-muted); }
+        .empty-state { text-align: center; color: var(--text-muted); padding: 40px 20px; font-size: 13.5px; }
+
+        .candidate-card { border: 1px solid var(--border); background: #fff; padding: 18px; border-radius: 12px; margin-bottom: 14px; }
+        .candidate-card-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 8px; }
+        .candidate-card-header h4 { font-size: 15px; font-weight: 700; color: var(--text-dark); }
+        .match-badge { padding: 5px 12px; border-radius: 8px; font-size: 13px; font-weight: 700; }
+        .match-high { background: #d1fae5; color: #065f46; }
+        .match-mid { background: #fef3c7; color: #92400e; }
+        .match-low { background: #f1f5f9; color: #475569; }
+        .candidate-meta { font-size: 12.5px; color: var(--text-muted); margin-bottom: 8px; }
+        .candidate-skills { font-size: 13px; line-height: 1.5; margin-bottom: 8px; }
+        .txt-success { color: #059669; font-weight: 600; }
+        .txt-danger { color: #dc2626; font-weight: 600; }
+        .candidate-explanation { font-size: 13px; color: #334155; font-style: italic; margin-bottom: 10px; }
+        .contact-reveal { background: var(--accent); border-radius: 8px; padding: 10px 12px; font-size: 13px; margin-top: 8px; }
+
+        @media(max-width: 960px) { .content-grid { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <h1>🎯 SkillForge <span style="font-size: 14px; font-weight: 500; opacity: 0.85;">Recruiter</span></h1>
+        <div class="user-profile">
+            <span id="navUsername">Recruiter</span>
+            <button class="logout-btn" onclick="handleLogout()">Logout</button>
+        </div>
+    </nav>
+
+    <div class="dashboard-container">
+        <div class="welcome-card">
+            <h2>Welcome back, <span id="welcomeName">Recruiter</span></h2>
+            <p>Company: <span id="welcomeCompany">-</span> &middot; Post a job and get AI-ranked candidate matches instantly.</p>
+        </div>
+
+        <div class="content-grid">
+            <div class="panel">
+                <h3>Post a New Job</h3>
+                <div class="success-banner" id="jobSuccessBanner"></div>
+
+                <form id="jobPostForm">
+                    <div class="form-group">
+                        <label>Company Name</label>
+                        <input type="text" id="jobCompanyName" class="form-input" required>
+                        <div id="companyPreviewBox" class="candidate-explanation" style="display: none; margin-top: 8px;"></div>
+                    </div>
+                    <div class="form-group">
+                        <label>Role Title</label>
+                        <input type="text" id="jobRoleTitle" class="form-input" placeholder="e.g. Senior .NET Engineer" required>
+                        <div class="error-message" id="jobRoleTitleError"></div>
+                    </div>
+                    <div class="form-group">
+                        <label>Job Description</label>
+                        <textarea id="jobDescription" class="form-textarea" placeholder="Describe the role and responsibilities"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Required Skills (comma-separated)</label>
+                        <input type="text" id="jobRequiredSkills" class="form-input" placeholder="e.g. C#, ASP.NET Core, SQL" required>
+                        <div class="error-message" id="jobRequiredSkillsError"></div>
+                    </div>
+                    <div class="form-group">
+                        <label>Years of Experience</label>
+                        <input type="text" id="jobYearsOfExperience" class="form-input" placeholder="e.g. 3-5 years">
+                    </div>
+                    <div class="form-group">
+                        <label>Salary Range (optional)</label>
+                        <input type="text" id="jobSalaryRange" class="form-input" placeholder="e.g. 90000-120000">
+                    </div>
+                    <div class="form-group">
+                        <label>Work Modes</label>
+                        <div class="checkbox-row">
+                            <label><input type="checkbox" value="WFH" name="workMode"> WFH</label>
+                            <label><input type="checkbox" value="Hybrid" name="workMode"> Hybrid</label>
+                            <label><input type="checkbox" value="WFO" name="workMode"> WFO</label>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Locations (comma-separated)</label>
+                        <input type="text" id="jobLocations" class="form-input" placeholder="e.g. Bengaluru, Remote">
+                    </div>
+
+                    <button type="submit" class="action-btn" id="jobPostBtn">
+                        <div id="jobPostSpinner" class="spinner"></div>
+                        <span id="jobPostBtnText">Post Job</span>
+                    </button>
+                </form>
+            </div>
+
+            <div class="panel">
+                <h3>My Posted Jobs</h3>
+                <div id="jobsList" class="jobs-list">
+                    <div class="empty-state">Loading your posted jobs...</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel" id="candidatesPanel" style="display: none;">
+            <h3 id="candidatesPanelTitle">Ranked Candidates</h3>
+            <div id="candidatesList"></div>
+        </div>
+    </div>
+
+    <script>
+        const BACKEND_PORTS = ['5123', '7123', '5000'];
+
+        async function fetchWithFallback(endpoint, options, attempt = 0) {
+            const currentUrl = `http://localhost:${BACKEND_PORTS[attempt]}/api${endpoint}`;
+            try {
+                // Any HTTP response (even 4xx/5xx) means this port is reachable - let the caller handle status codes.
+                return await fetch(currentUrl, options);
+            } catch (error) {
+                // Only a genuine fetch rejection (connection refused, DNS, etc.) means this port is down.
+                if (attempt + 1 < BACKEND_PORTS.length) {
+                    return await fetchWithFallback(endpoint, options, attempt + 1);
+                }
+                throw new Error("No active web service listening on configured system ports (5123, 7123, 5000). Verify backend logic is running.");
+            }
+        }
+
+        function authHeaders() {
+            const token = localStorage.getItem('token');
+            return { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
+        }
+
+        function handleLogout() {
+            localStorage.clear();
+            window.location.href = './login.html';
+        }
+
+        // 401 = missing/expired token, 403 = token valid but wrong role (e.g. stale candidate token) - both need a fresh login.
+        function handleAuthFailure(response) {
+            if (response.status === 401 || response.status === 403) {
+                alert('Your recruiter session is invalid or has expired. Please log in again.');
+                handleLogout();
+                return true;
+            }
+            return false;
+        }
+
+        async function parseJsonSafe(response) {
+            const text = await response.text();
+            if (!text) return {};
+            try { return JSON.parse(text); } catch { return {}; }
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            const token = localStorage.getItem('token');
+            const role = localStorage.getItem('role');
+
+            if (!token || role !== 'recruiter') {
+                localStorage.clear();
+                window.location.href = './login.html';
+                return;
+            }
+
+            const username = localStorage.getItem('username') || 'Recruiter';
+            const companyName = localStorage.getItem('companyName') || '';
+
+            document.getElementById('navUsername').textContent = username;
+            document.getElementById('welcomeName').textContent = username;
+            document.getElementById('welcomeCompany').textContent = companyName || '-';
+            document.getElementById('jobCompanyName').value = companyName;
+
+            loadMyJobs();
+        });
+
+        function hideCompanyPreview() {
+            const box = document.getElementById('companyPreviewBox');
+            box.style.display = 'none';
+            box.textContent = '';
+        }
+
+        let companyPreviewLastRequested = '';
+        document.getElementById('jobCompanyName').addEventListener('blur', async (e) => {
+            const companyName = e.target.value.trim();
+            const box = document.getElementById('companyPreviewBox');
+
+            if (!companyName) {
+                hideCompanyPreview();
+                return;
+            }
+            if (companyName === companyPreviewLastRequested) return;
+            companyPreviewLastRequested = companyName;
+
+            box.style.display = 'block';
+            box.textContent = 'Generating a quick AI description of this company...';
+
+            try {
+                const response = await fetchWithFallback('/recruiter/jobs/preview-company-description', {
+                    method: 'POST',
+                    headers: authHeaders(),
+                    body: JSON.stringify({ companyName })
+                });
+                if (handleAuthFailure(response)) return;
+                const data = await parseJsonSafe(response);
+
+                if (response.ok && data.companyDescription) {
+                    box.textContent = `🏢 ${data.companyDescription}`;
+                } else {
+                    hideCompanyPreview();
+                }
+            } catch (error) {
+                hideCompanyPreview();
+            }
+        });
+
+        async function loadMyJobs() {
+            const jobsList = document.getElementById('jobsList');
+            try {
+                const response = await fetchWithFallback('/recruiter/jobs', { method: 'GET', headers: authHeaders() });
+                if (handleAuthFailure(response)) return;
+                const jobs = await parseJsonSafe(response);
+                renderJobsList(response.ok ? jobs : []);
+            } catch (error) {
+                jobsList.innerHTML = `<div class="empty-state">Could not load posted jobs: ${error.message}</div>`;
+            }
+        }
+
+        function renderJobsList(jobs) {
+            const jobsList = document.getElementById('jobsList');
+            jobsList.innerHTML = '';
+
+            if (!jobs || jobs.length === 0) {
+                jobsList.innerHTML = '<div class="empty-state">No jobs posted yet. Use the form to post your first job.</div>';
+                return;
+            }
+
+            jobs.forEach(job => {
+                const card = document.createElement('div');
+                card.className = 'job-card';
+                const createdAt = new Date(job.createdAt).toLocaleString();
+                card.innerHTML = `
+                    <div class="job-card-header">
+                        <div>
+                            <h4>${job.roleTitle}</h4>
+                            <p>🏢 ${job.companyName}</p>
+                        </div>
+                        <button class="secondary-btn" onclick="viewCandidates(${job.id}, '${(job.roleTitle || '').replace(/'/g, "\\'")}')">View Candidates</button>
+                    </div>
+                    <div class="job-card-meta">Posted ${createdAt}</div>
+                `;
+                jobsList.appendChild(card);
+            });
+        }
+
+        document.getElementById('jobPostForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            document.querySelectorAll('.error-message').forEach(el => el.classList.remove('show'));
+            document.getElementById('jobSuccessBanner').classList.remove('show');
+
+            const companyName = document.getElementById('jobCompanyName').value.trim();
+            const roleTitle = document.getElementById('jobRoleTitle').value.trim();
+            const jobDescription = document.getElementById('jobDescription').value.trim();
+            const requiredSkills = document.getElementById('jobRequiredSkills').value.split(',').map(s => s.trim()).filter(Boolean);
+            const yearsOfExperience = document.getElementById('jobYearsOfExperience').value.trim();
+            const salaryRange = document.getElementById('jobSalaryRange').value.trim();
+            const workModes = Array.from(document.querySelectorAll('input[name="workMode"]:checked')).map(cb => cb.value);
+            const locations = document.getElementById('jobLocations').value.split(',').map(s => s.trim()).filter(Boolean);
+
+            if (!roleTitle) {
+                document.getElementById('jobRoleTitleError').textContent = 'Role title is required';
+                document.getElementById('jobRoleTitleError').classList.add('show');
+                return;
+            }
+            if (requiredSkills.length === 0) {
+                document.getElementById('jobRequiredSkillsError').textContent = 'At least one required skill is needed';
+                document.getElementById('jobRequiredSkillsError').classList.add('show');
+                return;
+            }
+
+            const postBtn = document.getElementById('jobPostBtn');
+            const spinner = document.getElementById('jobPostSpinner');
+            postBtn.disabled = true;
+            spinner.classList.add('show');
+
+            try {
+                const response = await fetchWithFallback('/recruiter/jobs', {
+                    method: 'POST',
+                    headers: authHeaders(),
+                    body: JSON.stringify({
+                        roleTitle, jobDescription, requiredSkills, yearsOfExperience,
+                        salaryRange: salaryRange || null, workModes, locations, companyName
+                    })
+                });
+
+                if (handleAuthFailure(response)) return;
+
+                const data = await parseJsonSafe(response);
+
+                if (response.ok) {
+                    const banner = document.getElementById('jobSuccessBanner');
+                    banner.innerHTML = `<strong>Job posted successfully!</strong><br>${data.companyDescription}`;
+                    banner.classList.add('show');
+                    document.getElementById('jobPostForm').reset();
+                    document.getElementById('jobCompanyName').value = companyName;
+                    hideCompanyPreview();
+                    loadMyJobs();
+                } else {
+                    alert(data.error || `Failed to post job (status ${response.status}).`);
+                }
+            } catch (error) {
+                alert('Network error: ' + error.message);
+            } finally {
+                postBtn.disabled = false;
+                spinner.classList.remove('show');
+            }
+        });
+
+        async function viewCandidates(jobId, roleTitle) {
+            const panel = document.getElementById('candidatesPanel');
+            const list = document.getElementById('candidatesList');
+            document.getElementById('candidatesPanelTitle').textContent = `Ranked Candidates - ${roleTitle}`;
+            panel.style.display = 'block';
+            list.innerHTML = '<div class="empty-state">Loading AI-ranked candidates...</div>';
+            panel.scrollIntoView({ behavior: 'smooth' });
+
+            try {
+                const response = await fetchWithFallback(`/recruiter/jobs/${jobId}/candidates`, { method: 'GET', headers: authHeaders() });
+                if (handleAuthFailure(response)) return;
+                const candidates = await parseJsonSafe(response);
+                renderCandidates(jobId, response.ok ? candidates : []);
+            } catch (error) {
+                list.innerHTML = `<div class="empty-state">Could not load candidates: ${error.message}</div>`;
+            }
+        }
+
+        function renderCandidates(jobId, candidates) {
+            const list = document.getElementById('candidatesList');
+            list.innerHTML = '';
+
+            if (!candidates || candidates.length === 0) {
+                list.innerHTML = '<div class="empty-state">No matching candidates found yet.</div>';
+                return;
+            }
+
+            candidates.forEach(candidate => {
+                const score = candidate.matchScore ?? 0;
+                let badgeClass = 'match-low';
+                if (score >= 70) badgeClass = 'match-high';
+                else if (score >= 40) badgeClass = 'match-mid';
+
+                const card = document.createElement('div');
+                card.className = 'candidate-card';
+                card.id = `candidate-card-${candidate.candidateId}`;
+                card.innerHTML = `
+                    <div class="candidate-card-header">
+                        <h4>${candidate.name || 'Candidate #' + candidate.candidateId}</h4>
+                        <span class="match-badge ${badgeClass}">${score}% Match</span>
+                    </div>
+                    <div class="candidate-meta">🎓 ${candidate.highestQualification || 'Not specified'} &middot; ⏱ ${candidate.yearsOfExperience || 'Not specified'}</div>
+                    <div class="candidate-skills">
+                        <div><span class="txt-success">✓ Matched:</span> ${(candidate.matchedSkills || []).join(', ') || 'None'}</div>
+                        <div><span class="txt-danger">✗ Missing:</span> ${(candidate.missingSkills || []).join(', ') || 'None'}</div>
+                    </div>
+                    <div class="candidate-explanation">${candidate.explanation || ''}</div>
+                    <button class="secondary-btn" onclick="selectCandidate(${jobId}, ${candidate.candidateId})">Select Candidate</button>
+                    <div id="contact-${candidate.candidateId}"></div>
+                `;
+                list.appendChild(card);
+            });
+        }
+
+        async function selectCandidate(jobId, candidateId) {
+            const contactDiv = document.getElementById(`contact-${candidateId}`);
+            contactDiv.innerHTML = '<div class="candidate-meta">Selecting candidate...</div>';
+
+            try {
+                const response = await fetchWithFallback(`/recruiter/jobs/${jobId}/candidates/${candidateId}/select`, {
+                    method: 'POST',
+                    headers: authHeaders()
+                });
+                if (handleAuthFailure(response)) return;
+                const data = await parseJsonSafe(response);
+
+                if (response.ok) {
+                    contactDiv.innerHTML = `
+                        <div class="contact-reveal">
+                            <strong>Contact revealed:</strong><br>
+                            📧 ${data.email || 'Not provided'}<br>
+                            📞 ${data.phone || 'Not provided'}<br>
+                            ${data.emailSent ? '✅ Shortlist email sent.' : '⚠️ Shortlist email not sent (SMTP not configured or delivery failed).'}
+                        </div>
+                    `;
+                } else {
+                    contactDiv.innerHTML = `<div class="candidate-meta">Error: ${data.error || 'Selection failed.'}</div>`;
+                }
+            } catch (error) {
+                contactDiv.innerHTML = `<div class="candidate-meta">Network error: ${error.message}</div>`;
+            }
+        }
+    </script>
+</body>
+</html>

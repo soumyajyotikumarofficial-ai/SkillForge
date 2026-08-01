@@ -3,6 +3,9 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Collections.Generic;
+using System.Security.Claims;
+using System.Text.Json;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -253,7 +256,7 @@ public class CandidateController : ControllerBase
                     { "salaryRange", FormatSalary(job) },
                     { "currency", job.Currency },
                     { "country", job.Country },
-                    { "applyUrl", job.ApplyUrl ?? "https://linkedin.com" },
+                    { "applyUrl", string.IsNullOrWhiteSpace(job.ApplyUrl) ? "" : job.ApplyUrl },
                     { "benefits", job.Benefits ?? "" },
                     { "explanation", explanation },
                     { "MatchScore", currentScore },
@@ -265,7 +268,7 @@ public class CandidateController : ControllerBase
                     { "SalaryRange", FormatSalary(job) },
                     { "Currency", job.Currency },
                     { "Country", job.Country },
-                    { "ApplyUrl", job.ApplyUrl ?? "https://linkedin.com" },
+                    { "ApplyUrl", string.IsNullOrWhiteSpace(job.ApplyUrl) ? "" : job.ApplyUrl },
                     { "Benefits", job.Benefits ?? "" },
                     { "Explanation", explanation }
                 };
@@ -292,6 +295,424 @@ public class CandidateController : ControllerBase
         {
             _logger.LogError(ex, "Fatal failure parsing and mapping system entities on resume ingestion pipelines.");
             return StatusCode(500, new { error = "Internal controller parsing error occurred.", details = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Resolves (or lazily creates) the single Candidate profile tied to the authenticated user's JWT identity.
+    /// </summary>
+    private async Task<Candidate> GetOrCreateCandidateForCurrentUserAsync()
+    {
+        var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!int.TryParse(userIdClaim, out var userId))
+        {
+            throw new UnauthorizedAccessException("Missing or invalid user identity.");
+        }
+
+        var candidate = await _dbContext.Candidates.FirstOrDefaultAsync(c => c.UserId == userId);
+        if (candidate == null)
+        {
+            candidate = new Candidate { UserId = userId, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow };
+            _dbContext.Candidates.Add(candidate);
+            await _dbContext.SaveChangesAsync();
+        }
+        return candidate;
+    }
+
+    // ===================== FEATURE 2: RESUME MANAGEMENT (max 2, JSON-only, duplicate-name guard) =====================
+
+    private static readonly string[] AllowedResumeExtensions = { ".pdf", ".docx", ".txt" };
+
+    [Authorize]
+    [HttpPost("resumes")]
+    public async Task<IActionResult> UploadManagedResume(IFormFile file)
+    {
+        if (file == null || file.Length == 0)
+        {
+            return BadRequest(new { error = "Please upload a valid resume file." });
+        }
+
+        var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+        if (!AllowedResumeExtensions.Contains(extension))
+        {
+            return BadRequest(new { error = "Unsupported file type. Please upload a PDF, DOCX, or TXT resume." });
+        }
+
+        Candidate candidate;
+        try
+        {
+            candidate = await GetOrCreateCandidateForCurrentUserAsync();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Unauthorized(new { error = "Please log in to upload a resume." });
+        }
+
+        var existingResumes = await _dbContext.CandidateResumes
+            .Where(r => r.CandidateId == candidate.CandidateId)
+            .ToListAsync();
+
+        // Rule: candidates may keep at most 2 saved resume profiles.
+        if (existingResumes.Count >= 2)
+        {
+            return StatusCode(StatusCodes.Status409Conflict, new
+            {
+                error = "You already have 2 saved resumes, which is the maximum allowed. Please delete an existing resume before uploading a new one.",
+                requiresDeletion = true
+            });
+        }
+
+        // Rule: reject duplicate file names against this candidate's existing resumes.
+        var trimmedFileName = file.FileName.Trim();
+        if (existingResumes.Any(r => string.Equals(r.FileName, trimmedFileName, StringComparison.OrdinalIgnoreCase)))
+        {
+            return BadRequest(new { error = "A resume with this file name already exists. Please rename your file or delete the previous version." });
+        }
+
+        var analysis = await _aiService.ParseResumeToJsonAsync(file);
+        if (analysis == null)
+        {
+            return StatusCode(503, new { error = "The AI parsing service is currently experiencing high demand or failed to parse the resume. Please try again." });
+        }
+
+        // Storage constraint: only the AI-parsed JSON is persisted. The raw file bytes are never written to disk.
+        var resume = new CandidateResume
+        {
+            CandidateId = candidate.CandidateId,
+            FileName = trimmedFileName,
+            FileExtension = extension,
+            ParsedResumeJson = JsonSerializer.Serialize(analysis),
+            IsActive = existingResumes.Count == 0,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        try
+        {
+            _dbContext.CandidateResumes.Add(resume);
+            await _dbContext.SaveChangesAsync();
+        }
+        catch (DbUpdateException)
+        {
+            return BadRequest(new { error = "A resume with this file name already exists. Please rename your file or delete the previous version." });
+        }
+
+        if (resume.IsActive)
+        {
+            candidate.ActiveResumeId = resume.CandidateResumeId;
+            ApplyResumeDetailsToCandidate(candidate, analysis.Candidate);
+            await _dbContext.SaveChangesAsync();
+        }
+
+        return Ok(new ResumeUploadResponseDto
+        {
+            ResumeId = resume.CandidateResumeId,
+            FileName = resume.FileName,
+            Score = analysis.Score,
+            Summary = analysis.Summary,
+            Skills = analysis.Skills,
+            ResumeCount = existingResumes.Count + 1,
+            IsActive = resume.IsActive
+        });
+    }
+
+    [Authorize]
+    [HttpGet("resumes")]
+    public async Task<IActionResult> GetMyResumes()
+    {
+        Candidate candidate;
+        try
+        {
+            candidate = await GetOrCreateCandidateForCurrentUserAsync();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Unauthorized(new { error = "Please log in to view resumes." });
+        }
+
+        var resumes = await _dbContext.CandidateResumes
+            .Where(r => r.CandidateId == candidate.CandidateId)
+            .OrderByDescending(r => r.CreatedAt)
+            .ToListAsync();
+
+        var summaries = resumes.Select(r =>
+        {
+            var parsed = TryDeserializeResumeAnalysis(r.ParsedResumeJson);
+            return new ResumeSummaryDto
+            {
+                ResumeId = r.CandidateResumeId,
+                FileName = r.FileName,
+                IsActive = r.IsActive,
+                CreatedAt = r.CreatedAt,
+                DeducedRole = parsed?.Candidate?.Role,
+                Score = parsed?.Score ?? 0
+            };
+        }).ToList();
+
+        return Ok(summaries);
+    }
+
+    // Full parsed detail for one stored resume - lets the dashboard redisplay a candidate's data
+    // (score/summary/skills/contact info) on every login without re-uploading/re-parsing the file.
+    [Authorize]
+    [HttpGet("resumes/{resumeId:int}")]
+    public async Task<IActionResult> GetResumeDetail(int resumeId)
+    {
+        Candidate candidate;
+        try
+        {
+            candidate = await GetOrCreateCandidateForCurrentUserAsync();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Unauthorized(new { error = "Please log in to view resume details." });
+        }
+
+        var resume = await _dbContext.CandidateResumes
+            .FirstOrDefaultAsync(r => r.CandidateResumeId == resumeId && r.CandidateId == candidate.CandidateId);
+
+        if (resume == null)
+        {
+            return NotFound(new { error = "Resume not found for this candidate." });
+        }
+
+        var parsed = TryDeserializeResumeAnalysis(resume.ParsedResumeJson);
+
+        return Ok(new ResumeDetailDto
+        {
+            ResumeId = resume.CandidateResumeId,
+            FileName = resume.FileName,
+            IsActive = resume.IsActive,
+            CreatedAt = resume.CreatedAt,
+            Score = parsed?.Score ?? 0,
+            Summary = parsed?.Summary ?? "",
+            Skills = parsed?.Skills ?? new List<string>(),
+            Name = parsed?.Candidate?.Name ?? candidate.Name,
+            Email = parsed?.Candidate?.Email ?? candidate.Email,
+            Phone = parsed?.Candidate?.Phone ?? candidate.Phone,
+            Location = parsed?.Candidate?.Location ?? candidate.Location,
+            HighestQualification = parsed?.Candidate?.HighestQualification ?? candidate.HighestQualification,
+            YearsOfExperience = parsed?.Candidate?.YearsOfExperience ?? candidate.YearsOfExperience
+        });
+    }
+
+    // Login selection menu (Feature 3): candidate picks which of their 1-2 resumes is "active".
+    [Authorize]
+    [HttpPost("resumes/{resumeId:int}/activate")]
+    public async Task<IActionResult> ActivateResume(int resumeId)
+    {
+        Candidate candidate;
+        try
+        {
+            candidate = await GetOrCreateCandidateForCurrentUserAsync();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Unauthorized(new { error = "Please log in to select an active resume." });
+        }
+
+        var resumes = await _dbContext.CandidateResumes
+            .Where(r => r.CandidateId == candidate.CandidateId)
+            .ToListAsync();
+
+        var target = resumes.FirstOrDefault(r => r.CandidateResumeId == resumeId);
+        if (target == null)
+        {
+            return NotFound(new { error = "Resume not found for this candidate." });
+        }
+
+        foreach (var r in resumes)
+        {
+            r.IsActive = r.CandidateResumeId == resumeId;
+            r.UpdatedAt = DateTime.UtcNow;
+        }
+        candidate.ActiveResumeId = resumeId;
+        candidate.UpdatedAt = DateTime.UtcNow;
+        ApplyResumeDetailsToCandidate(candidate, TryDeserializeResumeAnalysis(target.ParsedResumeJson)?.Candidate);
+
+        await _dbContext.SaveChangesAsync();
+        return Ok(new { success = true, activeResumeId = resumeId });
+    }
+
+    [Authorize]
+    [HttpDelete("resumes/{resumeId:int}")]
+    public async Task<IActionResult> DeleteResume(int resumeId)
+    {
+        Candidate candidate;
+        try
+        {
+            candidate = await GetOrCreateCandidateForCurrentUserAsync();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Unauthorized(new { error = "Please log in to delete a resume." });
+        }
+
+        var target = await _dbContext.CandidateResumes
+            .FirstOrDefaultAsync(r => r.CandidateResumeId == resumeId && r.CandidateId == candidate.CandidateId);
+
+        if (target == null)
+        {
+            return NotFound(new { error = "Resume not found for this candidate." });
+        }
+
+        bool wasActive = target.IsActive;
+        _dbContext.CandidateResumes.Remove(target);
+
+        if (wasActive)
+        {
+            candidate.ActiveResumeId = null;
+        }
+        await _dbContext.SaveChangesAsync();
+
+        if (wasActive)
+        {
+            var fallback = await _dbContext.CandidateResumes
+                .Where(r => r.CandidateId == candidate.CandidateId)
+                .OrderBy(r => r.CreatedAt)
+                .FirstOrDefaultAsync();
+
+            if (fallback != null)
+            {
+                fallback.IsActive = true;
+                candidate.ActiveResumeId = fallback.CandidateResumeId;
+                await _dbContext.SaveChangesAsync();
+            }
+        }
+
+        return Ok(new { success = true, deletedResumeId = resumeId });
+    }
+
+    // ===================== FEATURE 3: ACTIVE-RESUME + WORK-MODE FILTERED JOB SEARCH =====================
+
+    [Authorize]
+    [HttpGet("job-matches")]
+    public async Task<IActionResult> GetJobMatchesForActiveResume(
+        [FromQuery] string? workMode,
+        [FromQuery] string? country,
+        [FromQuery] string? location1,
+        [FromQuery] string? location2,
+        [FromQuery] string? location3,
+        [FromQuery] string? roleAspiration)
+    {
+        Candidate candidate;
+        try
+        {
+            candidate = await GetOrCreateCandidateForCurrentUserAsync();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Unauthorized(new { error = "Please log in to view job matches." });
+        }
+
+        if (candidate.ActiveResumeId == null)
+        {
+            return BadRequest(new { error = "Select an active resume first." });
+        }
+
+        var activeResume = await _dbContext.CandidateResumes
+            .FirstOrDefaultAsync(r => r.CandidateResumeId == candidate.ActiveResumeId);
+
+        if (activeResume == null)
+        {
+            return BadRequest(new { error = "Active resume could not be located. Please re-select an active resume." });
+        }
+
+        var skills = TryDeserializeResumeAnalysis(activeResume.ParsedResumeJson)?.Skills ?? new List<string>();
+        var normalizedSkills = skills.SelectMany(ExpandSkillKeywords).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+        // Work Mode preference filter: WFH, Hybrid, or WFO.
+        var validWorkModes = new[] { "WFH", "Hybrid", "WFO" };
+        string? normalizedWorkMode = null;
+        if (!string.IsNullOrWhiteSpace(workMode))
+        {
+            normalizedWorkMode = validWorkModes.FirstOrDefault(m => string.Equals(m, workMode.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (normalizedWorkMode == null)
+            {
+                return BadRequest(new { error = "Invalid workMode. Expected one of: WFH, Hybrid, WFO." });
+            }
+        }
+
+        // Optional country/location/role-aspiration preferences, re-collected on every search (not persisted).
+        var preferredLocations = new List<string?> { location1, location2, location3 }
+            .Where(l => !string.IsNullOrWhiteSpace(l))
+            .Select(l => l!.Trim())
+            .ToList();
+        string? preferredCountry = string.IsNullOrWhiteSpace(country) ? null : country.Trim();
+        bool hasExplicitRole = !string.IsNullOrWhiteSpace(roleAspiration);
+        var roleKeywords = hasExplicitRole
+            ? roleAspiration!.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries).Where(k => k.Length > 2).ToList()
+            : new List<string>();
+
+        // WorkMode isn't populated on every ingested job (legacy/seeded rows); treat unset the same
+        // way Location/Country are treated below, so it doesn't silently zero out the whole list.
+        var jobsQuery = _dbContext.Jobs.AsQueryable();
+        if (normalizedWorkMode != null)
+        {
+            jobsQuery = jobsQuery.Where(j => j.WorkMode == normalizedWorkMode || string.IsNullOrWhiteSpace(j.WorkMode));
+        }
+
+        var jobs = (await jobsQuery.ToListAsync())
+            .Where(job => preferredLocations.Count == 0
+                || preferredLocations.Any(loc => job.Location.Contains(loc, StringComparison.OrdinalIgnoreCase) || loc.Contains(job.Location, StringComparison.OrdinalIgnoreCase)))
+            .Where(job => preferredCountry == null
+                || string.IsNullOrWhiteSpace(job.Country)
+                || job.Country.Contains(preferredCountry, StringComparison.OrdinalIgnoreCase)
+                || preferredCountry.Contains(job.Country, StringComparison.OrdinalIgnoreCase))
+            .Where(job => !hasExplicitRole || roleKeywords.Count == 0 || roleKeywords.Any(k => job.Title.Contains(k, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+
+        var ranked = jobs.Select(job =>
+        {
+            var requiredSkills = ParseJobSkillsText(job.Description, job.Title);
+            var matched = normalizedSkills.Intersect(requiredSkills.Select(s => s.ToLower()), StringComparer.OrdinalIgnoreCase).ToList();
+            int score = requiredSkills.Count > 0 ? (int)Math.Round((double)matched.Count / requiredSkills.Count * 100) : 0;
+
+            return new
+            {
+                jobId = job.JobId,
+                jobTitle = job.Title,
+                companyName = job.CompanyName,
+                location = job.Location,
+                workMode = job.WorkMode,
+                applyUrl = string.IsNullOrWhiteSpace(job.ApplyUrl) ? "" : job.ApplyUrl,
+                matchScore = score,
+                matchedSkills = matched
+            };
+        })
+        .OrderByDescending(j => j.matchScore)
+        .ToList();
+
+        return Ok(new { activeResumeId = activeResume.CandidateResumeId, workModeFilter = normalizedWorkMode ?? "Any", jobMatches = ranked });
+    }
+
+    // Syncs contact/profile fields onto the Candidate row from the active resume's AI-parsed details,
+    // so recruiter contact-reveal (post-selection) has real data instead of empty strings.
+    private static void ApplyResumeDetailsToCandidate(Candidate candidate, CandidateDetails? details)
+    {
+        if (details == null) return;
+
+        if (!string.IsNullOrWhiteSpace(details.Name)) candidate.Name = details.Name;
+        if (!string.IsNullOrWhiteSpace(details.Email)) candidate.Email = details.Email;
+        if (!string.IsNullOrWhiteSpace(details.Phone)) candidate.Phone = details.Phone;
+        if (!string.IsNullOrWhiteSpace(details.Location)) candidate.Location = details.Location;
+        if (!string.IsNullOrWhiteSpace(details.HighestQualification)) candidate.HighestQualification = details.HighestQualification;
+        if (!string.IsNullOrWhiteSpace(details.YearsOfExperience)) candidate.YearsOfExperience = details.YearsOfExperience;
+        candidate.UpdatedAt = DateTime.UtcNow;
+    }
+
+    private static readonly JsonSerializerOptions CaseInsensitiveJsonOptions = new() { PropertyNameCaseInsensitive = true };
+
+    // Case-insensitive so this reads both the current camelCase-agnostic serialization and any legacy rows.
+    private static ResumeAnalysisResult? TryDeserializeResumeAnalysis(string json)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<ResumeAnalysisResult>(json, CaseInsensitiveJsonOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
         }
     }
 

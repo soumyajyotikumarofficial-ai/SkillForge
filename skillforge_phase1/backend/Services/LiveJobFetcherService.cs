@@ -229,7 +229,9 @@ public class LiveJobFetcherService : BackgroundService
                             Description = extJob.Description,
                             SalaryRange = string.IsNullOrWhiteSpace(extJob.SalaryRange) ? "NA" : extJob.SalaryRange,
                             Currency = string.IsNullOrWhiteSpace(extJob.Currency) ? "INR" : extJob.Currency,
-                            ApplyUrl = extJob.ApplyUrl,
+                            ApplyUrl = string.IsNullOrWhiteSpace(extJob.ApplyUrl) ? extJob.FinalUrl : extJob.ApplyUrl,
+                            FinalUrl = string.IsNullOrWhiteSpace(extJob.FinalUrl) ? extJob.ApplyUrl : extJob.FinalUrl,
+                            WorkMode = DetermineWorkMode(extJob.Description, locationName),
                             Benefits = extJob.Benefits,
                             CreatedAt = DateTime.UtcNow,
                             FetchedAtUtc = DateTime.UtcNow,
@@ -332,5 +334,21 @@ SyncComplete:
         };
 
         return keywords.Any(text.Contains);
+    }
+
+    private static string DetermineWorkMode(string description, string locationName)
+    {
+        var normalized = $"{description} {locationName}".ToLowerInvariant();
+        if (normalized.Contains("remote") || normalized.Contains("work from home") || normalized.Contains("wfh"))
+        {
+            return "WFH";
+        }
+
+        if (normalized.Contains("hybrid") || normalized.Contains("partial remote") || normalized.Contains("some office"))
+        {
+            return "Hybrid";
+        }
+
+        return "WFO";
     }
 }

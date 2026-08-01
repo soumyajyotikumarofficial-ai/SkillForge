@@ -25,6 +25,7 @@ public class ApifyJobResult
     public string Currency { get; set; } = "USD";
     public DateTime? SourceCreatedAt { get; set; }
     public string ApplyUrl { get; set; } = "";
+    public string FinalUrl { get; set; } = "";
     public string Benefits { get; set; } = ""; // Flattened, comma-separated
 }
 
@@ -72,6 +73,8 @@ public class ApifyJobService
             var requestUrl = $"{baseUrl}/acts/{actorId}/run-sync-get-dataset-items?token={Uri.EscapeDataString(apiToken)}";
 
             // Defensive input shape: covers the commonly used field names across Apify job-scraper actors.
+            // followApplyRedirects makes the Indeed scraper follow its own redirect chain and return the
+            // true final destination (the company's own career site) instead of an indeed.com link.
             var inputPayload = new
             {
                 position = searchQuery,
@@ -80,7 +83,8 @@ public class ApifyJobService
                 location = location,
                 country = country,
                 maxItems = maxItems,
-                maxResults = maxItems
+                maxResults = maxItems,
+                followApplyRedirects = true
             };
 
             var json = JsonSerializer.Serialize(inputPayload);
@@ -135,8 +139,12 @@ public class ApifyJobService
         string description = GetFirstString(item, "description", "descriptionText", "job_description") ?? "";
         string salary = GetFirstString(item, "salary", "salaryRange", "job_salary_string") ?? "";
 
-        // URL Direct Linkage: map the incoming application link straight through to ApplyUrl.
-        string applyUrl = GetFirstString(item, "url", "externalApplyLink", "applyUrl", "job_apply_link") ?? "";
+        // Feature 1: only ever surface a genuine direct-to-company application link. "url"/"finalUrl" for this
+        // actor point back at the indeed.com listing itself, so they are deliberately excluded here - if no
+        // externalApplyLink is present (or it still resolves to an aggregator domain), ApplyUrl is left empty
+        // rather than silently redirecting candidates to Indeed/LinkedIn/etc.
+        string rawApplyUrl = GetFirstString(item, "externalApplyLink", "applyUrl", "job_apply_link") ?? "";
+        string applyUrl = IsAggregatorUrl(rawApplyUrl) ? "" : rawApplyUrl;
 
         string benefits = "";
         if (TryGetArray(item, out var benefitsArray, "benefits", "job_benefits", "perks"))
@@ -158,6 +166,7 @@ public class ApifyJobService
             Currency = GetCurrencyFromCountry(country),
             SourceCreatedAt = ParseSourceCreatedAt(item),
             ApplyUrl = applyUrl.Trim(),
+            FinalUrl = applyUrl.Trim(),
             Benefits = benefits
         };
     }
@@ -173,6 +182,22 @@ public class ApifyJobService
             }
         }
         return null;
+    }
+
+    // Job aggregator/board domains that should never be surfaced as a "direct apply" URL.
+    private static readonly string[] AggregatorDomains =
+    {
+        "indeed.com", "linkedin.com", "glassdoor.com", "ziprecruiter.com",
+        "monster.com", "simplyhired.com", "careerbuilder.com", "ncr.indeed.com"
+    };
+
+    private static bool IsAggregatorUrl(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return true;
+        if (!Uri.TryCreate(url.Trim(), UriKind.Absolute, out var uri)) return true;
+
+        var host = uri.Host.ToLowerInvariant();
+        return AggregatorDomains.Any(domain => host == domain || host.EndsWith("." + domain));
     }
 
     private static DateTime? ParseSourceCreatedAt(JsonElement element)

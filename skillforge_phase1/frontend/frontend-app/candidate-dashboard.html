@@ -110,6 +110,18 @@
         .pref-input { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; background: #fff; color: var(--text-dark); }
         .pref-input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1); }
         .pref-locations-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+
+        /* Resume management list */
+        .resume-item { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; display: flex; justify-content: space-between; align-items: center; gap: 10px; background: #fff; }
+        .resume-item.active { border-color: var(--success); background: #f0fdf4; }
+        .resume-item-name { font-size: 13.5px; font-weight: 600; color: var(--text-dark); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; }
+        .resume-item-meta { font-size: 11.5px; color: var(--text-muted); }
+        .resume-active-badge { background: var(--success); color: white; font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 6px; text-transform: uppercase; }
+        .resume-actions { display: flex; gap: 6px; }
+        .resume-actions button { border: 1px solid var(--border); background: var(--accent); color: var(--text-dark); font-size: 12px; font-weight: 600; padding: 6px 10px; border-radius: 6px; cursor: pointer; }
+        .resume-actions button:hover { background: #e0e7ff; }
+        .resume-actions button.delete-btn:hover { background: #fee2e2; color: var(--danger); }
+
         
         @media(max-width: 960px) { .content-grid { grid-template-columns: 1fr; } .summary-header-row { grid-template-columns: 1fr; } .score-card, .details-card { height: auto; padding: 20px; } }
     </style>
@@ -131,40 +143,61 @@
 
         <div class="content-grid">
             <div class="panel">
-                <h3>Resume Upload</h3>
-                <div id="dropZone" class="upload-container" onclick="document.getElementById('resumeInput').click()">
-                    <div class="upload-icon">📬</div>
-                    <p style="color: var(--text-dark); font-weight: 600; font-size: 15px;">Choose file or drag here</p>
-                    <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Supports PDF, DOCX, TXT</p>
-                    <input type="file" id="resumeInput" accept=".pdf,.docx,.txt" onchange="handleFileSelection(this)">
-                    <div id="fileInfo" class="file-info"></div>
+                <h3>My Resumes (max 2)</h3>
+                <div id="resumesList" style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;"></div>
+
+                <div id="uploadSection">
+                    <div id="dropZone" class="upload-container" onclick="document.getElementById('resumeInput').click()">
+                        <div class="upload-icon">📬</div>
+                        <p style="color: var(--text-dark); font-weight: 600; font-size: 15px;">Choose file or drag here</p>
+                        <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Supports PDF, DOCX, TXT</p>
+                        <input type="file" id="resumeInput" accept=".pdf,.docx,.txt" onchange="handleFileSelection(this)">
+                        <div id="fileInfo" class="file-info"></div>
+                    </div>
+
+                    <button id="analyzeBtn" class="action-btn" disabled onclick="triggerResumeUpload()">
+                        <div id="btnSpinner" class="spinner"></div>
+                        <span id="btnText">Upload &amp; Analyze Resume</span>
+                    </button>
+                </div>
+
+                <div id="maxResumesNotice" style="display: none; text-align: center; color: var(--text-muted); font-size: 13.5px; padding: 16px; background: var(--accent); border-radius: 10px;">
+                    You already have 2 saved resumes (the maximum). Delete one above before uploading a new one.
+                </div>
+
+                <h3 style="margin-top: 24px;">Job Search Preferences</h3>
+
+                <div class="pref-group">
+                    <label for="prefWorkMode">Work Mode Filter</label>
+                    <select id="prefWorkMode" class="pref-input" onchange="handleJobPreferencesChange()">
+                        <option value="">Any</option>
+                        <option value="WFH">WFH</option>
+                        <option value="Hybrid">Hybrid</option>
+                        <option value="WFO">WFO</option>
+                    </select>
                 </div>
 
                 <div class="pref-group">
                     <label for="prefCountry">Country</label>
-                    <select id="prefCountry" class="pref-input"></select>
+                    <select id="prefCountry" class="pref-input" onchange="handleJobPreferencesChange()"></select>
                 </div>
 
                 <div class="pref-group">
                     <label>Preferred Locations / States (up to 3)</label>
                     <div class="pref-locations-row">
-                        <input type="text" id="prefLocation1" class="pref-input" list="countryStatesList" placeholder="Location 1" autocomplete="off">
-                        <input type="text" id="prefLocation2" class="pref-input" list="countryStatesList" placeholder="Location 2" autocomplete="off">
-                        <input type="text" id="prefLocation3" class="pref-input" list="countryStatesList" placeholder="Location 3" autocomplete="off">
+                        <input type="text" id="prefLocation1" class="pref-input" list="countryStatesList" placeholder="Location 1" autocomplete="off" onblur="handleJobPreferencesChange()">
+                        <input type="text" id="prefLocation2" class="pref-input" list="countryStatesList" placeholder="Location 2" autocomplete="off" onblur="handleJobPreferencesChange()">
+                        <input type="text" id="prefLocation3" class="pref-input" list="countryStatesList" placeholder="Location 3" autocomplete="off" onblur="handleJobPreferencesChange()">
                     </div>
                     <datalist id="countryStatesList"></datalist>
                 </div>
 
                 <div class="pref-group">
                     <label for="prefRoleAspiration">Target Role Aspiration (optional)</label>
-                    <input type="text" id="prefRoleAspiration" class="pref-input" placeholder="Leave blank to auto-detect from resume">
+                    <input type="text" id="prefRoleAspiration" class="pref-input" placeholder="Leave blank to match on skills only" onblur="handleJobPreferencesChange()">
                 </div>
-
-                <button id="analyzeBtn" class="action-btn" disabled onclick="triggerResumeAnalysis()">
-                    <div id="btnSpinner" class="spinner"></div>
-                    <span id="btnText">Analyze Profile Metrics</span>
-                </button>
             </div>
+
 
             <div class="panel" style="min-height: 500px;">
                 <h3>Analysis Dashboard</h3>
@@ -217,8 +250,43 @@
     </div>
 
     <script>
-        const BACKEND_PORTS = ['5123', '5000'];
+        const BACKEND_PORTS = ['5123', '7123', '5000'];
         let selectedFile = null;
+
+        // Only retries the next port on a genuine fetch() connection failure (server unreachable).
+        // Any HTTP response (including 401/403/409/500) is returned as-is for the caller to handle.
+        async function fetchWithFallback(path, options = {}) {
+            let lastError = null;
+            for (let i = 0; i < BACKEND_PORTS.length; i++) {
+                const protocol = BACKEND_PORTS[i] === '5123' ? 'https' : 'http';
+                const targetEndpoint = `${protocol}://localhost:${BACKEND_PORTS[i]}${path}`;
+                try {
+                    return await fetch(targetEndpoint, options);
+                } catch (err) {
+                    lastError = err;
+                }
+            }
+            throw lastError || new Error('No active web service listening on configured system ports.');
+        }
+
+        function authHeaders() {
+            return { 'Authorization': `Bearer ${localStorage.getItem('token')}` };
+        }
+
+        function handleAuthFailure(response) {
+            if (response.status === 401 || response.status === 403) {
+                alert('Your session has expired or is invalid. Please log in again.');
+                handleLogout();
+                return true;
+            }
+            return false;
+        }
+
+        async function parseJsonSafe(response) {
+            const text = await response.text();
+            if (!text) return {};
+            try { return JSON.parse(text); } catch { return {}; }
+        }
 
         // ISO 3166-1 country codes + English short names (all recognized world countries).
         const COUNTRIES = [
@@ -350,6 +418,7 @@
             });
 
             initDragAndDrop();
+            loadResumes();
         });
 
         function initDragAndDrop() {
@@ -388,20 +457,115 @@
                 selectedFile = input.files[0];
                 document.getElementById('fileInfo').textContent = `Selected: ${selectedFile.name} (${(selectedFile.size/1024).toFixed(1)} KB)`;
                 document.getElementById('analyzeBtn').disabled = false;
-                
-                document.getElementById('resultsWrapper').classList.remove('show');
-                document.getElementById('placeholderView').style.display = 'block';
             }
         }
 
-        async function triggerResumeAnalysis() {
+        // Loads the candidate's saved resumes (max 2, persisted server-side) so they never have
+        // to re-upload after logging back in.
+        async function loadResumes() {
+            try {
+                const response = await fetchWithFallback('/api/Candidate/resumes', { headers: authHeaders() });
+                if (handleAuthFailure(response)) return;
+                if (!response.ok) {
+                    console.warn('Failed to load resumes:', response.status);
+                    return;
+                }
+                const resumes = await parseJsonSafe(response);
+                renderResumesList(Array.isArray(resumes) ? resumes : []);
+
+                const active = (Array.isArray(resumes) ? resumes : []).find(r => r.isActive || r.IsActive);
+                if (active) {
+                    const activeId = active.resumeId ?? active.ResumeId;
+                    await loadResumeDetail(activeId);
+                    await loadJobMatches();
+                }
+            } catch (err) {
+                console.error('Could not reach the backend to load resumes.', err);
+                alert('Could not reach the backend service. Please ensure it is running.');
+            }
+        }
+
+        function renderResumesList(resumes) {
+            const list = document.getElementById('resumesList');
+            list.innerHTML = '';
+
+            resumes.forEach(r => {
+                const id = r.resumeId ?? r.ResumeId;
+                const fileName = r.fileName ?? r.FileName;
+                const isActive = r.isActive ?? r.IsActive;
+                const score = r.score ?? r.Score ?? 0;
+
+                const item = document.createElement('div');
+                item.className = `resume-item${isActive ? ' active' : ''}`;
+                item.innerHTML = `
+                    <div>
+                        <div class="resume-item-name" title="${fileName}">${fileName}</div>
+                        <div class="resume-item-meta">Score: ${score}${isActive ? ' · <span class="resume-active-badge">Active</span>' : ''}</div>
+                    </div>
+                    <div class="resume-actions">
+                        ${isActive ? '' : `<button onclick="activateResume(${id})">Set Active</button>`}
+                        <button class="delete-btn" onclick="deleteResume(${id})">Delete</button>
+                    </div>
+                `;
+                list.appendChild(item);
+            });
+
+            const atMax = resumes.length >= 2;
+            document.getElementById('uploadSection').style.display = atMax ? 'none' : 'block';
+            document.getElementById('maxResumesNotice').style.display = atMax ? 'block' : 'none';
+
+            selectedFile = null;
+            const fileInput = document.getElementById('resumeInput');
+            if (fileInput) fileInput.value = '';
+            document.getElementById('fileInfo').textContent = '';
+            document.getElementById('analyzeBtn').disabled = true;
+        }
+
+        async function activateResume(resumeId) {
+            try {
+                const response = await fetchWithFallback(`/api/Candidate/resumes/${resumeId}/activate`, {
+                    method: 'POST',
+                    headers: authHeaders()
+                });
+                if (handleAuthFailure(response)) return;
+                if (!response.ok) {
+                    const err = await parseJsonSafe(response);
+                    alert(err.error || 'Failed to activate resume.');
+                    return;
+                }
+                await loadResumes();
+            } catch (err) {
+                alert('Could not reach the backend service. Please ensure it is running.');
+            }
+        }
+
+        async function deleteResume(resumeId) {
+            if (!confirm('Delete this resume? This cannot be undone.')) return;
+            try {
+                const response = await fetchWithFallback(`/api/Candidate/resumes/${resumeId}`, {
+                    method: 'DELETE',
+                    headers: authHeaders()
+                });
+                if (handleAuthFailure(response)) return;
+                if (!response.ok) {
+                    const err = await parseJsonSafe(response);
+                    alert(err.error || 'Failed to delete resume.');
+                    return;
+                }
+                document.getElementById('resultsWrapper').classList.remove('show');
+                document.getElementById('placeholderView').style.display = 'block';
+                await loadResumes();
+            } catch (err) {
+                alert('Could not reach the backend service. Please ensure it is running.');
+            }
+        }
+
+        async function triggerResumeUpload() {
             if (!selectedFile) return;
 
             const analyzeBtn = document.getElementById('analyzeBtn');
             const spinner = document.getElementById('btnSpinner');
             const btnText = document.getElementById('btnText');
-            const placeholderView = document.getElementById('placeholderView');
-            const resultsWrapper = document.getElementById('resultsWrapper');
 
             analyzeBtn.disabled = true;
             spinner.classList.add('show');
@@ -409,154 +573,169 @@
 
             const formData = new FormData();
             formData.append('file', selectedFile);
-            formData.append('country', document.getElementById('prefCountry').value.trim() || 'US');
-            formData.append('location1', document.getElementById('prefLocation1').value.trim());
-            formData.append('location2', document.getElementById('prefLocation2').value.trim());
-            formData.append('location3', document.getElementById('prefLocation3').value.trim());
-            formData.append('roleAspiration', document.getElementById('prefRoleAspiration').value.trim());
 
-            let responseSuccess = false;
-            let outputText = "";
-            const token = localStorage.getItem('token');
+            try {
+                const response = await fetchWithFallback('/api/Candidate/resumes', {
+                    method: 'POST',
+                    headers: authHeaders(),
+                    body: formData
+                });
 
-            for (let i = 0; i < BACKEND_PORTS.length; i++) {
-                try {
-                    const protocol = BACKEND_PORTS[i] === '5123' ? 'https' : 'http';
-                    const targetEndpoint = `${protocol}://localhost:${BACKEND_PORTS[i]}/api/Candidate/upload-resume`;
-                    
-                    console.log(`Pinging link routing context: ${targetEndpoint}`);
+                if (handleAuthFailure(response)) return;
 
-                    const response = await fetch(targetEndpoint, {
-                        method: 'POST',
-                        headers: {
-                            'Authorization': `Bearer ${token}`
-                        },
-                        body: formData
-                    });
+                const body = await parseJsonSafe(response);
 
-                    if (response.ok) {
-                        outputText = await response.text();
-                        responseSuccess = true;
-                        break;
-                    }
-                } catch (err) {
-                    console.warn(`Connection dropped on local target channel port ${BACKEND_PORTS[i]}.`);
+                if (response.status === 409) {
+                    alert(body.error || 'You already have 2 resumes saved. Delete one before uploading a new one.');
+                    return;
                 }
-            }
+                if (response.status === 400) {
+                    alert(body.error || 'Upload rejected. Please check the file and try again.');
+                    return;
+                }
+                if (!response.ok) {
+                    alert(body.error || `Upload failed (status ${response.status}).`);
+                    return;
+                }
 
-            analyzeBtn.disabled = false;
-            spinner.classList.remove('show');
-            btnText.textContent = 'Analyze Profile Metrics';
-
-            if (responseSuccess) {
-                placeholderView.style.display = 'none';
-                resultsWrapper.classList.add('show');
-                renderBeautifulMetrics(outputText);
-            } else {
-                alert("Failed to establish processing context link updates. Ensure backend instances are up.");
+                await loadResumes();
+            } catch (err) {
+                alert('Could not reach the backend service. Please ensure it is running.');
+            } finally {
+                spinner.classList.remove('show');
+                btnText.textContent = 'Upload & Analyze Resume';
             }
         }
 
-        function renderBeautifulMetrics(rawData) {
+        function handleJobPreferencesChange() {
+            loadJobMatches();
+        }
+
+        async function loadResumeDetail(resumeId) {
             try {
-                const data = JSON.parse(rawData);
-                
-                // 1. Dynamic Score Rendering
-                const targetScore = Math.min(Math.max(parseInt(data.score || data.Score) || 0, 0), 100); 
-                document.getElementById('scoreNumber').textContent = targetScore;
-                
-                const scoreRing = document.getElementById('scoreRing');
-                scoreRing.style.background = `conic-gradient(var(--success) 0% ${targetScore}%, #e2e8f0 ${targetScore}% 100%)`;
-
-                // 2. Profile Identity Details
-                const candidate = data.candidate || data.Candidate || {};
-                document.getElementById('candidateName').textContent = candidate.name || candidate.Name || "Unknown Professional";
-                document.getElementById('candidateEmail').textContent = candidate.email || candidate.Email || "N/A";
-                document.getElementById('candidatePhone').textContent = candidate.phone || candidate.Phone || "N/A";
-                document.getElementById('candidateLocation').textContent = candidate.location || candidate.Location || "N/A";
-                document.getElementById('candidateEducation').textContent = candidate.highestQualification || candidate.HighestQualification || "Not Specified";
-
-                // 3. AI Executive Summary Block
-                document.getElementById('analysisSummary').textContent = data.summary || data.Summary || "No executive text breakdown recorded by the AI module engine.";
-
-                // 4. Capabilities / Skill Badges
-                const skillsContainer = document.getElementById('skillsContainer');
-                skillsContainer.innerHTML = ''; 
-
-                const skillList = data.skills || data.Skills || [];
-                if (skillList.length > 0) {
-                    skillList.forEach(skill => {
-                        const spanBadge = document.createElement('span');
-                        spanBadge.className = 'skill-badge';
-                        spanBadge.textContent = skill;
-                        skillsContainer.appendChild(spanBadge);
-                    });
-                } else {
-                    skillsContainer.innerHTML = `<span style="font-size:13px; color:var(--text-muted);">No technical skills identified.</span>`;
-                }
-
-                // 5. Job Feed List Processing (With Live Action Button Support)
-                const jobsContainer = document.getElementById('jobsContainer');
-                jobsContainer.innerHTML = '';
-
-                const matchesList = data.jobMatches || data.JobMatches || [];
-                if (matchesList.length > 0) {
-                    matchesList.forEach(match => {
-                        const score = match.matchScore ?? match.MatchScore ?? 0;
-                        const title = match.jobTitle ?? match.JobTitle ?? 'Job Position';
-                        const company = match.companyName ?? match.CompanyName ?? 'Confidential Employer';
-                        const loc = match.jobLocation ?? match.JobLocation ?? 'Remote / Global';
-                        const salary = match.salaryRange ?? match.SalaryRange ?? 'Competitive';
-                        
-                        // Parse external application URL mapping safely from the JSearch integration payload
-                        const applyUrl = match.applyUrl || match.ApplyUrl || match.jobLink || match.JobLink || '#';
-
-                        const formatSkillsList = (val) => Array.isArray(val) ? val.join(', ') : (val || 'None');
-                        const matchedSkills = formatSkillsList(match.matchedSkills ?? match.MatchedSkills);
-                        const missingSkills = formatSkillsList(match.missingSkills ?? match.MissingSkills);
-
-                        let badgeClass = 'match-low';
-                        if (score >= 70) badgeClass = 'match-high';
-                        else if (score >= 40) badgeClass = 'match-mid';
-
-                        const cardElement = document.createElement('div');
-                        cardElement.className = 'job-card';
-                        cardElement.innerHTML = `
-                            <div class="job-header">
-                                <div class="job-title-block">
-                                    <h4>${title}</h4>
-                                    <p>🏢 ${company}</p>
-                                </div>
-                                <div class="job-match-badge ${badgeClass}">
-                                    ${score}% Match
-                                </div>
-                            </div>
-                            <div class="job-meta-details">
-                                <span>📍 ${loc}</span>
-                                <span>💰 ${salary}</span>
-                            </div>
-                            <div class="job-skills-tracking">
-                                <div class="skills-line"><span class="txt-success">✓ Matched:</span> ${matchedSkills}</div>
-                                <div class="skills-line"><span class="txt-danger">✗ Missing:</span> ${missingSkills}</div>
-                            </div>
-                            <div style="display: flex; justify-content: flex-end; margin-top: 8px; border-top: 1px dashed var(--border); padding-top: 14px;">
-                                <a href="${applyUrl}" target="_blank" rel="noopener noreferrer" 
-                                   style="background: var(--primary); color: white; text-decoration: none; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; transition: background 0.2s; display: inline-flex; align-items: center; gap: 4px;">
-                                    Apply Now ↗
-                                </a>
-                            </div>
-                        `;
-                        jobsContainer.appendChild(cardElement);
-                    });
-                } else {
-                    jobsContainer.innerHTML = `<span style="font-size:13px; color:var(--text-muted); text-align:center; display:block; padding:20px;">No positions available matching this criteria at this time.</span>`;
-                }
-
+                const response = await fetchWithFallback(`/api/Candidate/resumes/${resumeId}`, { headers: authHeaders() });
+                if (handleAuthFailure(response)) return;
+                if (!response.ok) return;
+                const detail = await parseJsonSafe(response);
+                renderResumeDetail(detail);
             } catch (err) {
-                console.error("Layout rendering exception:", err);
-                document.getElementById('placeholderView').style.display = 'none';
-                document.getElementById('resultsWrapper').classList.add('show');
-                document.getElementById('analysisSummary').textContent = rawData;
+                console.error('Could not load resume detail.', err);
+            }
+        }
+
+        function renderResumeDetail(detail) {
+            document.getElementById('placeholderView').style.display = 'none';
+            document.getElementById('resultsWrapper').classList.add('show');
+
+            const targetScore = Math.min(Math.max(parseInt(detail.score) || 0, 0), 100);
+            document.getElementById('scoreNumber').textContent = targetScore;
+            document.getElementById('scoreRing').style.background = `conic-gradient(var(--success) 0% ${targetScore}%, #e2e8f0 ${targetScore}% 100%)`;
+
+            document.getElementById('candidateName').textContent = detail.name || 'Unknown Professional';
+            document.getElementById('candidateEmail').textContent = detail.email || 'N/A';
+            document.getElementById('candidatePhone').textContent = detail.phone || 'N/A';
+            document.getElementById('candidateLocation').textContent = detail.location || 'N/A';
+            document.getElementById('candidateEducation').textContent = detail.highestQualification || 'Not Specified';
+
+            document.getElementById('analysisSummary').textContent = detail.summary || 'No executive text breakdown recorded by the AI module engine.';
+
+            const skillsContainer = document.getElementById('skillsContainer');
+            skillsContainer.innerHTML = '';
+            const skillList = detail.skills || [];
+            if (skillList.length > 0) {
+                skillList.forEach(skill => {
+                    const spanBadge = document.createElement('span');
+                    spanBadge.className = 'skill-badge';
+                    spanBadge.textContent = skill;
+                    skillsContainer.appendChild(spanBadge);
+                });
+            } else {
+                skillsContainer.innerHTML = `<span style="font-size:13px; color:var(--text-muted);">No technical skills identified.</span>`;
+            }
+        }
+
+        async function loadJobMatches() {
+            const jobsContainer = document.getElementById('jobsContainer');
+            try {
+                // Preferences are re-collected from the form every time - never persisted server-side.
+                const params = new URLSearchParams();
+                const workMode = document.getElementById('prefWorkMode').value.trim();
+                const country = document.getElementById('prefCountry').value.trim();
+                const location1 = document.getElementById('prefLocation1').value.trim();
+                const location2 = document.getElementById('prefLocation2').value.trim();
+                const location3 = document.getElementById('prefLocation3').value.trim();
+                const roleAspiration = document.getElementById('prefRoleAspiration').value.trim();
+
+                if (workMode) params.set('workMode', workMode);
+                if (country) params.set('country', country);
+                if (location1) params.set('location1', location1);
+                if (location2) params.set('location2', location2);
+                if (location3) params.set('location3', location3);
+                if (roleAspiration) params.set('roleAspiration', roleAspiration);
+
+                const query = params.toString() ? `?${params.toString()}` : '';
+                const response = await fetchWithFallback(`/api/Candidate/job-matches${query}`, { headers: authHeaders() });
+                if (handleAuthFailure(response)) return;
+
+                if (!response.ok) {
+                    const err = await parseJsonSafe(response);
+                    jobsContainer.innerHTML = `<span style="font-size:13px; color:var(--text-muted); text-align:center; display:block; padding:20px;">${err.error || 'Set an active resume to see job matches.'}</span>`;
+                    return;
+                }
+
+                const data = await parseJsonSafe(response);
+                renderJobMatchesList(data.jobMatches || []);
+            } catch (err) {
+                jobsContainer.innerHTML = `<span style="font-size:13px; color:var(--text-muted); text-align:center; display:block; padding:20px;">Could not reach the backend service.</span>`;
+            }
+        }
+
+        function renderJobMatchesList(matchesList) {
+            const jobsContainer = document.getElementById('jobsContainer');
+            jobsContainer.innerHTML = '';
+
+            if (matchesList.length > 0) {
+                matchesList.forEach(match => {
+                    const score = match.matchScore ?? 0;
+                    const title = match.jobTitle ?? 'Job Position';
+                    const company = match.companyName ?? 'Confidential Employer';
+                    const loc = match.location ?? 'Remote / Global';
+                    const applyUrl = match.applyUrl || '#';
+                    const matchedSkills = Array.isArray(match.matchedSkills) ? match.matchedSkills.join(', ') : (match.matchedSkills || 'None');
+
+                    let badgeClass = 'match-low';
+                    if (score >= 70) badgeClass = 'match-high';
+                    else if (score >= 40) badgeClass = 'match-mid';
+
+                    const cardElement = document.createElement('div');
+                    cardElement.className = 'job-card';
+                    cardElement.innerHTML = `
+                        <div class="job-header">
+                            <div class="job-title-block">
+                                <h4>${title}</h4>
+                                <p>🏢 ${company}</p>
+                            </div>
+                            <div class="job-match-badge ${badgeClass}">
+                                ${score}% Match
+                            </div>
+                        </div>
+                        <div class="job-meta-details">
+                            <span>📍 ${loc}</span>
+                        </div>
+                        <div class="job-skills-tracking">
+                            <div class="skills-line"><span class="txt-success">✓ Matched:</span> ${matchedSkills}</div>
+                        </div>
+                        <div style="display: flex; justify-content: flex-end; margin-top: 8px; border-top: 1px dashed var(--border); padding-top: 14px;">
+                            <a href="${applyUrl}" target="_blank" rel="noopener noreferrer" 
+                               style="background: var(--primary); color: white; text-decoration: none; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; transition: background 0.2s; display: inline-flex; align-items: center; gap: 4px;">
+                                Apply Now ↗
+                            </a>
+                        </div>
+                    `;
+                    jobsContainer.appendChild(cardElement);
+                });
+            } else {
+                jobsContainer.innerHTML = `<span style="font-size:13px; color:var(--text-muted); text-align:center; display:block; padding:20px;">No positions available matching this criteria at this time.</span>`;
             }
         }
 

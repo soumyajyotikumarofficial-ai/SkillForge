@@ -15,11 +15,16 @@ public class SkillForgeDbContext : DbContext
 
     public DbSet<User> Users { get; set; }
     public DbSet<Candidate> Candidates { get; set; }
+    public DbSet<CandidateResume> CandidateResumes { get; set; }
     public DbSet<CandidateSkill> CandidateSkills { get; set; }
     public DbSet<Job> Jobs { get; set; }
     public DbSet<JobSkill> JobSkills { get; set; }
     public DbSet<JobMatch> JobMatches { get; set; }
     public DbSet<JobFetchHistory> JobFetchHistories { get; set; }
+    public DbSet<Recruiter> Recruiters { get; set; }
+    public DbSet<CompanyJobRequest> CompanyJobRequests { get; set; }
+    public DbSet<ProjectHiringRequest> ProjectHiringRequests { get; set; }
+    public DbSet<CandidateShortlist> CandidateShortlists { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -48,6 +53,21 @@ public class SkillForgeDbContext : DbContext
             .HasKey(c => c.CandidateId);
 
         modelBuilder.Entity<Candidate>()
+            .HasIndex(c => c.ActiveResumeId);
+
+        modelBuilder.Entity<Candidate>()
+            .HasMany(c => c.Resumes)
+            .WithOne(r => r.Candidate)
+            .HasForeignKey(r => r.CandidateId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<Candidate>()
+            .HasOne(c => c.ActiveResume)
+            .WithMany()
+            .HasForeignKey(c => c.ActiveResumeId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        modelBuilder.Entity<Candidate>()
             .HasMany(c => c.Skills)
             .WithOne(s => s.Candidate)
             .HasForeignKey(s => s.CandidateId)
@@ -62,6 +82,9 @@ public class SkillForgeDbContext : DbContext
         // ===== JOB CONFIGURATION =====
         modelBuilder.Entity<Job>()
             .HasKey(j => j.JobId);
+
+        modelBuilder.Entity<Job>()
+            .HasIndex(j => j.ApplyUrl);
 
         modelBuilder.Entity<Job>()
             .HasMany(j => j.RequiredSkills)
@@ -81,6 +104,64 @@ public class SkillForgeDbContext : DbContext
 
         modelBuilder.Entity<JobFetchHistory>()
             .HasKey(h => h.JobFetchHistoryId);
+
+        modelBuilder.Entity<CandidateResume>()
+            .HasKey(r => r.CandidateResumeId);
+
+        modelBuilder.Entity<CandidateResume>()
+            .HasIndex(r => new { r.CandidateId, r.FileName })
+            .IsUnique();
+
+        modelBuilder.Entity<CandidateResume>()
+            .Property(r => r.ParsedResumeJson)
+            .HasColumnType("TEXT");
+
+        modelBuilder.Entity<Recruiter>()
+            .HasKey(r => r.Id);
+
+        modelBuilder.Entity<Recruiter>()
+            .HasIndex(r => r.Email)
+            .IsUnique();
+
+        // ===== RECRUITER PORTAL WORKFLOWS (Feature 5) =====
+        modelBuilder.Entity<CompanyJobRequest>()
+            .HasKey(j => j.Id);
+
+        modelBuilder.Entity<CompanyJobRequest>()
+            .HasOne(j => j.Recruiter)
+            .WithMany(r => r.JobRequests)
+            .HasForeignKey(j => j.RecruiterId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<ProjectHiringRequest>()
+            .HasKey(p => p.Id);
+
+        modelBuilder.Entity<ProjectHiringRequest>()
+            .HasOne(p => p.Recruiter)
+            .WithMany(r => r.ProjectRequests)
+            .HasForeignKey(p => p.RecruiterId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<CandidateShortlist>()
+            .HasKey(s => s.Id);
+
+        modelBuilder.Entity<CandidateShortlist>()
+            .HasOne(s => s.CompanyJobRequest)
+            .WithMany(j => j.Shortlist)
+            .HasForeignKey(s => s.CompanyJobRequestId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<CandidateShortlist>()
+            .HasOne(s => s.ProjectHiringRequest)
+            .WithMany(p => p.Shortlist)
+            .HasForeignKey(s => s.ProjectHiringRequestId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<CandidateShortlist>()
+            .HasOne(s => s.Candidate)
+            .WithMany()
+            .HasForeignKey(s => s.CandidateId)
+            .OnDelete(DeleteBehavior.Cascade);
 
         // ===== SEED DEFAULT DATA =====
         // ✅ FIX: Use FIXED date instead of DateTime.UtcNow

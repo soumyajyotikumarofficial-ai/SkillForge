@@ -104,40 +104,45 @@ public class JobController : ControllerBase
     }
 
     [HttpGet]
-[AllowAnonymous]
-public async Task<IActionResult> GetAllJobs()
-{
-    try
+    [AllowAnonymous]
+    public async Task<IActionResult> GetAllJobs()
     {
-        // ✅ FIX: Use Select() to avoid circular references
-        var jobs = await _dbContext.Jobs
-            .Select(j => new 
-            {
-                j.JobId,
-                j.Title,
-                j.Description,
-                j.CompanyName,
-                j.Location,
-                j.SalaryRange,
-                j.CreatedAt,
-                RequiredSkills = j.RequiredSkills.Select(s => new 
+        try
+        {
+            var jobs = await _dbContext.Jobs
+                .Select(j => new 
                 {
-                    s.Id,
-                    s.SkillName,
-                    s.IsRequired,
-                    s.ProficiencyLevel
-                }).ToList()
-            })
-            .ToListAsync();
+                    j.JobId,
+                    j.Title,
+                    j.Description,
+                    j.CompanyName,
+                    j.Location,
+                    j.SalaryRange,
+                    j.Currency,
+                    j.WorkMode,
+                    j.ApplyUrl,
+                    j.FinalUrl,
+                    j.Country,
+                    j.Benefits,
+                    j.CreatedAt,
+                    RequiredSkills = j.RequiredSkills.Select(s => new 
+                    {
+                        s.Id,
+                        s.SkillName,
+                        s.IsRequired,
+                        s.ProficiencyLevel
+                    }).ToList()
+                })
+                .ToListAsync();
 
-        return Ok(jobs);  // ✅ NO CIRCULAR REFERENCE
+            return Ok(jobs);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting jobs");
+            return StatusCode(500, new { error = ex.Message });
+        }
     }
-    catch (Exception ex)
-    {
-        _logger.LogError(ex, "Error getting jobs");
-        return StatusCode(500, new { error = ex.Message });
-    }
-}
 
     [HttpGet("{id}")]
     [AllowAnonymous]
@@ -145,7 +150,6 @@ public async Task<IActionResult> GetAllJobs()
     {
         try
         {
-            // ✅ FIX: Return only what we need
             var job = await _dbContext.Jobs
                 .Where(j => j.JobId == id)
                 .Select(j => new 
@@ -156,6 +160,12 @@ public async Task<IActionResult> GetAllJobs()
                     j.CompanyName,
                     j.Location,
                     j.SalaryRange,
+                    j.Currency,
+                    j.WorkMode,
+                    j.ApplyUrl,
+                    j.FinalUrl,
+                    j.Country,
+                    j.Benefits,
                     j.CreatedAt,
                     RequiredSkills = j.RequiredSkills.Select(s => new 
                     {
@@ -179,10 +189,47 @@ public async Task<IActionResult> GetAllJobs()
         }
     }
 
+    [HttpGet("{id}/redirect")]
+    [AllowAnonymous]
+    public async Task<IActionResult> RedirectToApplyUrl(int id)
+    {
+        try
+        {
+            var job = await _dbContext.Jobs
+                .AsNoTracking()
+                .Where(j => j.JobId == id)
+                .Select(j => new { j.ApplyUrl, j.FinalUrl })
+                .FirstOrDefaultAsync();
+
+            if (job == null)
+                return NotFound(new { error = "Job not found" });
+
+            var targetUrl = string.IsNullOrWhiteSpace(job.FinalUrl) ? job.ApplyUrl : job.FinalUrl;
+
+            if (string.IsNullOrWhiteSpace(targetUrl))
+                return BadRequest(new { error = "No apply URL is configured for this job." });
+
+            if (!Uri.IsWellFormedUriString(targetUrl, UriKind.Absolute))
+                return BadRequest(new { error = "The job apply URL is not valid." });
+
+            return Redirect(targetUrl);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error redirecting to job apply URL");
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
     [HttpPost]
     [Authorize(Roles = "Recruiter")]
     public async Task<IActionResult> CreateJob([FromBody] CreateJobRequest request)
     {
+        if (request == null)
+        {
+            return BadRequest(new { error = "Request data is required." });
+        }
+
         try
         {
             var job = new Job
@@ -192,14 +239,21 @@ public async Task<IActionResult> GetAllJobs()
                 CompanyName = request.CompanyName ?? "Company",
                 Location = request.Location ?? "Remote",
                 SalaryRange = request.SalaryRange ?? "Negotiable",
-                CreatedAt = DateTime.UtcNow
+                Currency = request.Country != null ? GetCurrencyFromCountry(request.Country) : "USD",
+                ApplyUrl = request.ApplyUrl ?? string.Empty,
+                FinalUrl = request.FinalUrl ?? request.ApplyUrl ?? string.Empty,
+                WorkMode = string.IsNullOrWhiteSpace(request.WorkMode) ? "Hybrid" : request.WorkMode,
+                Country = request.Country ?? string.Empty,
+                Benefits = request.Benefits ?? string.Empty,
+                CreatedAt = DateTime.UtcNow,
+                FetchedAtUtc = DateTime.UtcNow,
+                RequiredSkills = new List<JobSkill>()
             };
 
             _dbContext.Jobs.Add(job);
             await _dbContext.SaveChangesAsync();
 
-            // Add required skills
-            if (request.RequiredSkills != null && request.RequiredSkills.Count > 0)
+            if (request.RequiredSkills != null && request.RequiredSkills.Any())
             {
                 foreach (var skill in request.RequiredSkills)
                 {
@@ -211,6 +265,7 @@ public async Task<IActionResult> GetAllJobs()
                         ProficiencyLevel = 3
                     });
                 }
+
                 await _dbContext.SaveChangesAsync();
             }
 
@@ -222,6 +277,26 @@ public async Task<IActionResult> GetAllJobs()
             _logger.LogError(ex, "Error creating job");
             return StatusCode(500, new { error = ex.Message });
         }
+    }
+
+    private static string GetCurrencyFromCountry(string country)
+    {
+        if (string.IsNullOrWhiteSpace(country))
+            return "USD";
+
+        return country.Trim().ToUpperInvariant() switch
+        {
+            "IN" or "INDIA" => "INR",
+            "US" or "UNITED STATES" => "USD",
+            "GB" or "UK" or "UNITED KINGDOM" => "GBP",
+            "CA" or "CANADA" => "CAD",
+            "AU" or "AUSTRALIA" => "AUD",
+            "DE" or "GERMANY" or "FR" or "FRANCE" or "ES" or "SPAIN" or "IT" or "ITALY" or "NL" or "NETHERLANDS" => "EUR",
+            "SG" or "SINGAPORE" => "SGD",
+            "AE" or "UNITED ARAB EMIRATES" => "AED",
+            "JP" or "JAPAN" => "JPY",
+            _ => "USD"
+        };
     }
 
     [HttpGet("{jobId}/candidates")]
@@ -400,6 +475,11 @@ public class CreateJobRequest
     public string? CompanyName { get; set; }
     public string? Location { get; set; }
     public string? SalaryRange { get; set; }
+    public string? Country { get; set; }
+    public string? WorkMode { get; set; }
+    public string? ApplyUrl { get; set; }
+    public string? FinalUrl { get; set; }
+    public string? Benefits { get; set; }
     public List<string> RequiredSkills { get; set; } = new();
 }
 
@@ -410,5 +490,10 @@ public class UpdateJobRequest
     public string? CompanyName { get; set; }
     public string? Location { get; set; }
     public string? SalaryRange { get; set; }
+    public string? Country { get; set; }
+    public string? WorkMode { get; set; }
+    public string? ApplyUrl { get; set; }
+    public string? FinalUrl { get; set; }
+    public string? Benefits { get; set; }
     public List<string>? RequiredSkills { get; set; }
 }

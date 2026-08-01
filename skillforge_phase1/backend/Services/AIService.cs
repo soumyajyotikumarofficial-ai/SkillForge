@@ -71,31 +71,7 @@ public class AIService
 
         try
         {
-            string extractedText = string.Empty;
-            var fileExtension = Path.GetExtension(file.FileName).ToLower();
-
-            using var memoryStream = new MemoryStream();
-            await file.CopyToAsync(memoryStream);
-            memoryStream.Position = 0;
-
-            if (fileExtension == ".pdf")
-            {
-                extractedText = ExtractTextFromPdf(memoryStream);
-            }
-            else if (fileExtension == ".docx")
-            {
-                extractedText = ExtractTextFromDocx(memoryStream);
-            }
-            else if (fileExtension == ".txt")
-            {
-                using var reader = new StreamReader(memoryStream, Encoding.UTF8);
-                extractedText = await reader.ReadToEndAsync();
-            }
-            else
-            {
-                _logger.LogWarning("Unsupported document format layout: '{Extension}'", fileExtension);
-                return null;
-            }
+            string extractedText = await ExtractResumeTextAsync(file);
 
             if (string.IsNullOrWhiteSpace(extractedText))
             {
@@ -137,6 +113,67 @@ public class AIService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Fatal failure during document compilation phase processing on file: {Name}", file.FileName);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Extracts raw text from an uploaded PDF/DOCX/TXT resume without persisting the file to disk.
+    /// The returned text is only ever held in memory for the duration of the parsing request.
+    /// </summary>
+    private async Task<string> ExtractResumeTextAsync(IFormFile file)
+    {
+        var fileExtension = Path.GetExtension(file.FileName).ToLower();
+
+        using var memoryStream = new MemoryStream();
+        await file.CopyToAsync(memoryStream);
+        memoryStream.Position = 0;
+
+        if (fileExtension == ".pdf")
+        {
+            return ExtractTextFromPdf(memoryStream);
+        }
+        if (fileExtension == ".docx")
+        {
+            return ExtractTextFromDocx(memoryStream);
+        }
+        if (fileExtension == ".txt")
+        {
+            using var reader = new StreamReader(memoryStream, Encoding.UTF8);
+            return await reader.ReadToEndAsync();
+        }
+
+        _logger.LogWarning("Unsupported document format layout: '{Extension}'", fileExtension);
+        return string.Empty;
+    }
+
+    /// <summary>
+    /// Resume-management pipeline (Feature 2): parses the uploaded file in-memory and returns the
+    /// structured AI analysis to be persisted as JSON only. The raw file bytes are never written to
+    /// disk or blob storage - once this method returns, the caller should discard the file stream.
+    /// </summary>
+    public async Task<ResumeAnalysisResult?> ParseResumeToJsonAsync(IFormFile file)
+    {
+        if (file == null || file.Length == 0)
+        {
+            _logger.LogWarning("Empty or unreadable file container delivered to AI parsing pipeline.");
+            return null;
+        }
+
+        try
+        {
+            string extractedText = await ExtractResumeTextAsync(file);
+            if (string.IsNullOrWhiteSpace(extractedText))
+            {
+                _logger.LogWarning("Failed to parse character symbols out of the uploaded payload file.");
+                return null;
+            }
+
+            return await AnalyzeResumeAsync(extractedText);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Fatal failure parsing resume for JSON-only persistence. File: {Name}", file.FileName);
             return null;
         }
     }

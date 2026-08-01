@@ -339,8 +339,8 @@
 
             <form id="loginForm" style="display: none;">
                 <div class="form-group">
-                    <label>Username</label>
-                    <input type="text" id="loginUsername" placeholder="Enter your username" required>
+                    <label>Username or Email</label>
+                    <input type="text" id="loginUsername" placeholder="Enter your username or email" required>
                     <div class="error-message" id="loginUsernameError"></div>
                 </div>
 
@@ -386,6 +386,24 @@
                     <div class="error-message" id="registerConfirmPasswordError"></div>
                 </div>
 
+                <div id="recruiterFields" style="display: none;">
+                    <div class="form-group">
+                        <label>Company Name</label>
+                        <input type="text" id="registerCompanyName" placeholder="Enter your company name">
+                        <div class="error-message" id="registerCompanyNameError"></div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Designation (optional)</label>
+                        <input type="text" id="registerDesignation" placeholder="e.g. HR Manager">
+                    </div>
+
+                    <div class="form-group">
+                        <label>Phone Number (optional)</label>
+                        <input type="text" id="registerPhoneNumber" placeholder="Enter your phone number">
+                    </div>
+                </div>
+
                 <div class="loader" id="registerLoader">
                     <div class="spinner"></div>
                 </div>
@@ -427,6 +445,9 @@
             console.log('Proceeding with role:', selectedRole);
             const roleText = selectedRole === 'candidate' ? 'Candidate' : 'Recruiter';
             document.getElementById('roleBadge').textContent = roleText;
+
+            // Recruiter accounts need extra profile fields (company/designation/phone) at signup.
+            document.getElementById('recruiterFields').style.display = selectedRole === 'recruiter' ? 'block' : 'none';
 
             // Hide role selection, show auth form
             document.getElementById('roleSelection').classList.remove('show');
@@ -484,21 +505,16 @@
 
         // ========== API CALL HELPER WITH RE-TRY ENGINE ==========
         async function fetchWithFallback(endpoint, options, attempt = 0) {
+            const currentUrl = `http://localhost:${BACKEND_PORTS[attempt]}/api${endpoint}`;
+            console.log(`Routing execution pipeline to target node: ${currentUrl}`);
+
             try {
-                const currentUrl = `http://localhost:${BACKEND_PORTS[attempt]}/api${endpoint}`;
-                console.log(`Routing execution pipeline to target node: ${currentUrl}`);
-                
+                // Any HTTP response (even 4xx/5xx) means this port is reachable - let the caller handle status codes.
                 const response = await fetch(currentUrl, options);
-                
-                // If it's an HTTP error code context, handle gracefully inside parsing
-                if (!response.ok && response.status !== 400 && response.status !== 401) {
-                    throw new Error(`Server returned status: ${response.status}`);
-                }
-                
-                // Track current active URL configuration baseline
                 API_URL = `http://localhost:${BACKEND_PORTS[attempt]}/api`;
                 return response;
             } catch (error) {
+                // Only a genuine fetch rejection (connection refused, DNS, etc.) means this port is down.
                 console.warn(`Port mapping deployment down at index ${attempt} (Port: ${BACKEND_PORTS[attempt]}). Error: ${error.message}`);
                 if (attempt + 1 < BACKEND_PORTS.length) {
                     return await fetchWithFallback(endpoint, options, attempt + 1);
@@ -535,11 +551,13 @@
 
             try {
                 console.log('Logging in user tracking metric:', username);
-                // ✅ UPDATED ROUTE: Pointing to /Candidate/login instead of /auth/login
-                const response = await fetchWithFallback('/Candidate/login', {
+                // Route to the correct backend auth controller for the selected role -
+                // recruiters live in a separate table/endpoint from candidates.
+                const loginEndpoint = selectedRole === 'recruiter' ? '/recruiter/auth/login' : '/Auth/login';
+                const response = await fetchWithFallback(loginEndpoint, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, password })
+                    body: JSON.stringify({ email: username, password })
                 });
 
                 // Read safely without crashing on null streams
@@ -551,12 +569,14 @@
                 const data = JSON.parse(textData);
                 console.log('Login engine parsed payload:', data);
 
-                // ✅ UPDATED STRUCTURAL CHECK: Handles your mock object configuration successfully
-                if (response.ok && (data.token || data.user)) {
-                    // Save token & username
-                    localStorage.setItem('token', data.token || 'mock-jwt-token-for-local-testing-purposes');
-                    localStorage.setItem('username', username);
+                if (response.ok && data.token) {
+                    // Save token & profile info
+                    localStorage.setItem('token', data.token);
+                    localStorage.setItem('username', selectedRole === 'recruiter' ? (data.fullName || username) : username);
                     localStorage.setItem('role', selectedRole);
+                    if (selectedRole === 'recruiter') {
+                        localStorage.setItem('companyName', data.companyName || '');
+                    }
 
                     console.log('Login successful, routing document reference...');
                     
@@ -589,6 +609,9 @@
             const email = document.getElementById('registerEmail').value.trim();
             const password = document.getElementById('registerPassword').value;
             const confirmPassword = document.getElementById('registerConfirmPassword').value;
+            const companyName = document.getElementById('registerCompanyName').value.trim();
+            const designation = document.getElementById('registerDesignation').value.trim();
+            const phoneNumber = document.getElementById('registerPhoneNumber').value.trim();
 
             // Validation
             if (!username || username.length < 3) {
@@ -607,6 +630,10 @@
                 showError('registerConfirmPasswordError', 'Passwords do not match');
                 return;
             }
+            if (selectedRole === 'recruiter' && !companyName) {
+                showError('registerCompanyNameError', 'Company name is required for recruiter accounts');
+                return;
+            }
 
             // API Call
             const registerBtn = document.getElementById('registerSubmitBtn');
@@ -617,16 +644,16 @@
 
             try {
                 console.log('Registering user data footprint:', username, email, selectedRole);
-                // ✅ UPDATED ROUTE: Pointing to /Candidate/register instead of /auth/register
-                const response = await fetchWithFallback('/Candidate/register', {
+                const isRecruiter = selectedRole === 'recruiter';
+                const registerEndpoint = isRecruiter ? '/recruiter/auth/register' : '/Auth/register';
+                const registerPayload = isRecruiter
+                    ? { fullName: username, email, password, companyName, designation, phoneNumber }
+                    : { name: username, email, password, role: 'Candidate' };
+
+                const response = await fetchWithFallback(registerEndpoint, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        username,
-                        email,
-                        password,
-                        role: selectedRole === 'candidate' ? 'Candidate' : 'Recruiter'
-                    })
+                    body: JSON.stringify(registerPayload)
                 });
 
                 const textData = await response.text();
@@ -638,9 +665,25 @@
                 console.log('Register engine response parsed:', data);
 
                 if (response.ok) {
-                    localStorage.setItem('token', data.token || 'mock-jwt-token-for-local-testing-purposes');
-                    localStorage.setItem('username', username);
+                    // Registration endpoints don't return a JWT - log in immediately to obtain a real one.
+                    const loginEndpoint = isRecruiter ? '/recruiter/auth/login' : '/Auth/login';
+                    const loginResponse = await fetchWithFallback(loginEndpoint, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email, password })
+                    });
+                    const loginData = JSON.parse(await loginResponse.text());
+
+                    if (!loginResponse.ok || !loginData.token) {
+                        throw new Error('Registered successfully, but automatic sign-in failed. Please log in manually.');
+                    }
+
+                    localStorage.setItem('token', loginData.token);
+                    localStorage.setItem('username', isRecruiter ? (loginData.fullName || username) : username);
                     localStorage.setItem('role', selectedRole);
+                    if (isRecruiter) {
+                        localStorage.setItem('companyName', loginData.companyName || companyName);
+                    }
 
                     console.log('Registration complete. Loading user identity profile...');
                     
