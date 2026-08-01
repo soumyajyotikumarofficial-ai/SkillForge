@@ -1,51 +1,142 @@
-# ⚡ SkillForge — Next-Gen AI Talent Matchmaking & Recruitment Engine
+# 🛠️ SkillForge
 
-[![.NET 10 Web API](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
-[![EF Core](https://img.shields.io/badge/Entity%20Framework-Core-blue)](https://docs.microsoft.com/en-us/ef/core/)
-[![LLM Powered](https://img.shields.io/badge/AI-Ollama%20%7C%20Groq%20%7C%20Llama3-orange?logo=openai)](https://ollama.ai/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-
-**SkillForge** is an enterprise-grade AI recruiting platform that bridges the gap between job seekers and hiring managers. Moving beyond keyword matching, SkillForge uses Large Language Models (LLMs) to parse resume context, calculate candidate-to-job skill gaps, route applicants directly to company career portals (Greenhouse, Workday, Lever), and automate AI-assisted team sizing for complex projects.
+**SkillForge** is an AI-powered job matching platform that connects candidates and recruiters through intelligent resume analysis, live job aggregation, and preference-driven matching. Upload a resume, let Gemini AI score and summarize it, then get matched against a continuously updated feed of live job postings — filtered by work mode, country, location, and career aspirations.
 
 ---
 
-## ✨ Key Architectural Highlights
+## ✨ Features
 
-### 🎯 Candidate Intelligence & Job Ingestion
-* **On-the-Fly JSON Resume Parsing:** Extracts skills, experience, and domain knowledge from uploaded PDFs into a structured `ParsedResumeJson` payload, eliminating heavy file storage and enabling instantaneous AI query evaluations.
-* **Dual-Profile Resume Management:** Candidates can maintain up to **2 active resume profiles** (with strict file-name duplicate validation) and toggle between them at login to tailor their active job feed.
-* **Direct ATS & Career Portal Routing:** Integrates Apify and ATS web scrapers to deliver **direct company apply URLs** (Greenhouse, Lever, Workday) alongside standard aggregator links (Indeed, LinkedIn).
-* **Work Mode & Location Filtering:** Native multi-select support for **WFH (Remote), Hybrid, and WFO (On-Site)** work environments.
+### 👤 For Candidates
+- **JWT-based authentication** — secure register/login flow with hashed credentials (BCrypt)
+- **AI resume analysis** — upload a PDF/DOCX/TXT resume and get an instant AI-generated score, summary, extracted skills, and role detection powered by **Google Gemini**
+- **Multi-resume management** — keep up to 2 resumes on file, switch the active one at any time, and pick up right where you left off across logins
+- **Smart job matching** — matches are ranked by skill overlap against your active resume
+- **Live search preferences** — filter matches by Work Mode (WFH / Hybrid / WFO), Country, up to 3 preferred Locations/States, and an optional Target Role — re-applied fresh on every search, never stale
+- **Direct-to-company apply links** — jump straight to the original job posting
 
-### 🤖 AI Recruiter Suite & Workforce Planning
-* **Workflow A: Company Hiring:**
-  * **Automated Company Briefs:** Auto-generates crisp, professional company descriptions (< 200 words) using LLMs.
-  * **Candidate Favorability Scoring:** Ranks applicants with natural-language AI reasoning explaining *why* a candidate is shortlisted.
-  * **Branded Candidate Outreach:** Automatically triggers HTML emails to candidates upon selection.
-* **Workflow B: Project-Based Team Sizing & Capacity Planning:**
-  * **AI Project Breakdown:** Analyzes raw project scope and deadlines to recommend exact workforce composition (e.g., *"Recommends 2x Senior .NET Engineers, 1x React Dev"*).
-  * **Automated Skill Allocation:** Matches the recommended team structure against active database profiles before triggering recruitment pipelines.
+### 🧑‍💼 For Recruiters
+- Dedicated recruiter authentication and dashboard
+- Post new job openings
+- Review matched candidates for posted roles
 
----
-
-## 🛠️ System Architecture & Tech Stack
-
-| Layer | Technology | Description |
-| :--- | :--- | :--- |
-| **Backend API** | C# / .NET 10 Web API | High-performance asynchronous REST endpoints |
-| **ORM & Database** | EF Core + SQLite | JSON column mappings for lightweight resume storage |
-| **AI Orchestration** | Ollama (Local) / Groq API | Llama 3 / Phi models for parsing & recommendation reasoning |
-| **Data Scraping** | Apify ATS Actors | Fetches live postings with direct company portal resolution |
-| **Email Gateway** | MailKit / SMTP | Sends branded shortlist notification emails |
-| **Frontend UI** | HTML5, Modern CSS3, JS | Responsive candidate and recruiter dashboards |
+### ⚙️ Under the Hood
+- **Live job ingestion engine** — a background worker that syncs fresh listings daily via the Apify job-scraper API, with configurable search queries, target countries/cities, de-duplication, and daily insert caps
+- **Resume parsing pipeline** — extracts raw text from PDF/DOCX/TXT and sends it to Gemini for structured analysis (name, contact info, experience, qualifications, skills, and a 1–100 fit score)
+- **Fuzzy, resilient matching** — location/country/skill matching tolerates missing or partial job metadata instead of silently returning empty result sets
 
 ---
 
-## 📋 Data Pipeline Overview
+## 🏗️ Tech Stack
 
-```text
-[ Candidate Resume ] ──> [ On-the-Fly AI Parser ] ──> [ SQLite: ParsedResumeJson ]
-                                                             │
-[ Apify Scrapers ]   ──> [ Direct ATS & Job Pipeline ] ──────┼──> [ Skill-Gap Engine ]
-                                                             │
-[ Recruiter Input ]  ──> [ AI Team Sizing & Matcher ] ───────┘──> [ Branded Email Trigger ]
+| Layer            | Technology |
+|------------------|------------|
+| Backend API      | ASP.NET Core (.NET 10 preview), C# |
+| Database         | SQLite via Entity Framework Core |
+| Authentication   | JWT Bearer + BCrypt password hashing |
+| AI Analysis      | Google Gemini API |
+| Live Job Sourcing| Apify job-scraper actor |
+| Frontend         | Vanilla HTML/CSS/JS dashboards (candidate + recruiter) |
+| API Docs         | Swagger / Swashbuckle |
+
+---
+
+## 📂 Project Structure
+
+```
+SkillForge/
+├── skillforge_phase1/
+│   ├── ARCHITECTURE_AND_FLOW_GUIDE.md   # Deep-dive architecture & data-flow reference
+│   ├── backend/                         # ASP.NET Core Web API
+│   │   ├── Controllers/                 # Auth, Candidate, Recruiter, Job, Matching, AI
+│   │   ├── Services/                    # AIService, ApifyJobService, LiveJobFetcherService, MatchingService
+│   │   ├── Models/                      # EF Core entities (User, CandidateProfile, Job, Match, ...)
+│   │   ├── Data/                        # SkillForgeDbContext
+│   │   ├── Migrations/                  # EF Core migrations
+│   │   └── appsettings.json             # DB, JWT, Gemini, and Apify configuration
+│   └── frontend/
+│       ├── frontend-app/                # Candidate & recruiter dashboards (vanilla JS)
+│       └── angular-app/                 # Supplementary Angular frontend assets
+└── README.md
+```
+
+For a detailed breakdown of the backend architecture, request flows, and data model relationships, see [ARCHITECTURE_AND_FLOW_GUIDE.md](skillforge_phase1/ARCHITECTURE_AND_FLOW_GUIDE.md).
+
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+- [.NET 10 SDK (preview)](https://dotnet.microsoft.com/download)
+- Node.js (for the frontend dev server, if used)
+- A [Google Gemini API key](https://ai.google.dev/) for resume analysis
+- An [Apify API token](https://apify.com/) for live job ingestion (optional but recommended)
+
+### 1. Configure the backend
+
+Update `skillforge_phase1/backend/appsettings.json` with your own values:
+
+```json
+{
+  "ConnectionStrings": { "DefaultConnection": "Data Source=skillforge.db" },
+  "Jwt": { "Key": "...", "Issuer": "...", "Audience": "..." },
+  "Gemini": { "ApiKey": "your-gemini-api-key" },
+  "Apify": {
+    "ApiToken": "your-apify-api-token",
+    "ActorId": "misceres~indeed-scraper",
+    "DailySearchQueries": "Software Engineer,.NET Developer,...",
+    "DailyLocations": "Kolkata,Bengaluru,Hyderabad,...",
+    "DailyCountries": "IN,US,GB,CA,DE",
+    "DailyFetchLimit": 10
+  }
+}
+```
+
+### 2. Run the backend
+
+```powershell
+cd skillforge_phase1/backend
+dotnet build
+dotnet run
+```
+
+The API listens on `http://localhost:5123` (falls back to `7123`/`5000`), applies EF Core migrations automatically, and exposes Swagger docs in development.
+
+### 3. Run the frontend
+
+```powershell
+cd skillforge_phase1/frontend/frontend-app
+npm install
+npm run dev
+```
+
+Open the candidate dashboard (`candidate-dashboard.html`) or recruiter dashboard in your browser and start uploading resumes or posting jobs.
+
+---
+
+## 🔑 Key API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/Auth/register` / `/api/Auth/login` | Candidate/recruiter authentication |
+| `POST` | `/api/Candidate/resumes` | Upload a new resume (max 2 per candidate) |
+| `GET`  | `/api/Candidate/resumes` | List saved resumes |
+| `POST` | `/api/Candidate/resumes/{id}/activate` | Set the active resume |
+| `DELETE` | `/api/Candidate/resumes/{id}` | Delete a saved resume |
+| `GET`  | `/api/Candidate/job-matches` | Get ranked job matches for the active resume, filterable by `workMode`, `country`, `location1-3`, `roleAspiration` |
+| `GET`  | `/api/Job` / `/api/Job/{id}` | Browse live job listings |
+| `GET`  | `/api/Job/live-sync-status` | View the latest live-fetch metrics |
+| `POST` | `/api/Job/run-daily-sync?force=true` | Manually trigger a live job sync |
+
+---
+
+## 🗺️ Roadmap
+
+- [ ] Full recruiter dashboard (post jobs, review candidates, manage listings)
+- [ ] Broader direct-to-company apply-link support beyond Indeed
+- [ ] Richer skill-weighting and experience-aware match scoring
+
+---
+
+## 📄 License
+
+This project is currently unlicensed for public distribution. Contact the repository owner for usage terms.

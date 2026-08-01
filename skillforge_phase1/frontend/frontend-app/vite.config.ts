@@ -14,6 +14,13 @@ export default defineConfig({
         entryFileNames: '[name].js',
         chunkFileNames: '[name]-[hash].js',
         assetFileNames: '[name]-[hash][extname]'
+      },
+      input: {
+        index: 'index.html',
+        login: 'login.html',
+        candidateDashboard: 'candidate-dashboard.html',
+        recruiterDashboard: 'recruiter-dashboard.html',
+        projectHiring: 'project-hiring.html'
       }
     }
   }

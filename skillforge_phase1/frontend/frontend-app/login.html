@@ -129,6 +129,35 @@
             cursor: not-allowed;
         }
 
+        .hiring-mode-selection {
+            display: none;
+            background: white;
+            border-radius: 10px;
+            padding: 40px 30px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+        }
+
+        .hiring-mode-selection.show { display: block; }
+
+        .hiring-mode-selection h2 { color: #333; margin-bottom: 10px; text-align: center; font-size: 24px; }
+        .hiring-mode-selection p { color: #666; text-align: center; margin-bottom: 25px; font-size: 14px; }
+
+        .hiring-mode-buttons { display: grid; gap: 15px; }
+
+        .hiring-mode-btn {
+            padding: 20px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            background: white;
+            cursor: pointer;
+            text-align: left;
+            transition: border-color 0.2s, background 0.2s;
+        }
+
+        .hiring-mode-btn:hover { border-color: #667eea; background: #f9f9ff; }
+        .hiring-mode-btn strong { display: block; color: #333; font-size: 16px; margin-bottom: 5px; }
+        .hiring-mode-btn span { color: #777; font-size: 13px; }
+
         /* Auth Form */
         .auth-form {
             display: none;
@@ -328,6 +357,21 @@
             <button class="role-action-btn" onclick="proceedWithRole()" id="roleActionBtn" disabled>Continue</button>
         </div>
 
+        <div class="hiring-mode-selection" id="hiringModeSelection">
+            <h2>Choose hiring type</h2>
+            <p>Use the same recruiter details for either hiring workflow.</p>
+            <div class="hiring-mode-buttons">
+                <button class="hiring-mode-btn" onclick="selectHiringMode('normal')">
+                    <strong>Normal hiring</strong>
+                    <span>Post one role and find the best candidates for it.</span>
+                </button>
+                <button class="hiring-mode-btn" onclick="selectHiringMode('project')">
+                    <strong>Project-based hiring</strong>
+                    <span>Describe a project, plan the team, and match candidates by role.</span>
+                </button>
+            </div>
+        </div>
+
         <div class="auth-form" id="authForm">
             <div class="form-header">
                 <button onclick="backToRoleSelection()">←</button>
@@ -346,9 +390,13 @@
 
                 <div class="form-group">
                     <label>Password</label>
-                    <input type="password" id="loginPassword" placeholder="Enter your password" required>
+                    <input type="password" id="loginPassword" placeholder="Enter your password" autocomplete="current-password" required>
                     <div class="error-message" id="loginPasswordError"></div>
                 </div>
+
+                <label style="display: flex; align-items: center; gap: 8px; color: #666; font-size: 13px; margin: -8px 0 20px;">
+                    <input type="checkbox" id="rememberEmail" style="width: auto;"> Remember my email on this device
+                </label>
 
                 <div class="loader" id="loginLoader">
                     <div class="spinner"></div>
@@ -423,6 +471,20 @@
         let API_URL = 'http://localhost:5123/api'; // Primary target
 
         let selectedRole = null;
+
+        const savedLoginEmail = localStorage.getItem('rememberedRecruiterEmail');
+        if (savedLoginEmail) document.getElementById('loginUsername').value = savedLoginEmail;
+
+        function selectHiringMode(mode) {
+            localStorage.setItem('hiringMode', mode);
+            window.location.href = mode === 'project' ? './project-hiring.html' : './recruiter-dashboard.html';
+        }
+
+        function showRecruiterHiringMode() {
+            document.getElementById('authForm').classList.remove('show');
+            document.getElementById('roleSelection').classList.remove('show');
+            document.getElementById('hiringModeSelection').classList.add('show');
+        }
 
         // ========== ROLE SELECTION ==========
 
@@ -570,6 +632,11 @@
                 console.log('Login engine parsed payload:', data);
 
                 if (response.ok && data.token) {
+                    if (selectedRole === 'recruiter' && document.getElementById('rememberEmail').checked) {
+                        localStorage.setItem('rememberedRecruiterEmail', username);
+                    } else if (selectedRole === 'recruiter') {
+                        localStorage.removeItem('rememberedRecruiterEmail');
+                    }
                     // Save token & profile info
                     localStorage.setItem('token', data.token);
                     localStorage.setItem('username', selectedRole === 'recruiter' ? (data.fullName || username) : username);
@@ -580,11 +647,10 @@
 
                     console.log('Login successful, routing document reference...');
                     
-                    // Redirect based on role
                     if (selectedRole === 'candidate') {
                         window.location.href = '/candidate-dashboard.html';
                     } else {
-                        window.location.href = '/recruiter-dashboard.html';
+                        showRecruiterHiringMode();
                     }
                 } else {
                     showError('loginPasswordError', data.error || 'Access denied. Invalid system credentials.');
@@ -690,7 +756,7 @@
                     if (selectedRole === 'candidate') {
                         window.location.href = '/candidate-dashboard.html';
                     } else {
-                        window.location.href = '/recruiter-dashboard.html';
+                        showRecruiterHiringMode();
                     }
                 } else {
                     showError('registerEmailError', data.error || 'Registration sequence interrupted.');
@@ -724,7 +790,14 @@
                 if (role === 'candidate') {
                     window.location.href = '/candidate-dashboard.html';
                 } else if (role === 'recruiter') {
-                    window.location.href = '/recruiter-dashboard.html';
+                    const hiringMode = localStorage.getItem('hiringMode');
+                    if (hiringMode === 'project') {
+                        window.location.href = './project-hiring.html';
+                    } else if (hiringMode === 'normal') {
+                        window.location.href = './recruiter-dashboard.html';
+                    } else {
+                        showRecruiterHiringMode();
+                    }
                 }
             }
         });

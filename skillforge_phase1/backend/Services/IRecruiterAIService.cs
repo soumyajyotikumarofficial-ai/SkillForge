@@ -18,7 +18,7 @@ public interface ICompanyDescriptionService
 /// </summary>
 public interface IProjectTeamPlannerService
 {
-    Task<string> GenerateTeamBreakdownAsync(string projectDescription, System.DateTime deadline);
+    Task<string> GenerateTeamBreakdownAsync(string projectDescription, string techStack, System.DateTime deadline, string companyName, string companyType);
 }
 
 /// <summary>Search criteria used to rank candidate resumes against a recruiter's hiring request.</summary>

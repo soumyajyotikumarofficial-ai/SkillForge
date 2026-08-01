@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SkillForge - Project Hiring</title>
+    <style>
+        :root { --primary: #4f46e5; --primary-dark: #3730a3; --bg: #f8fafc; --text: #172033; --muted: #64748b; --border: #dbe3ef; --success: #047857; --danger: #b91c1c; }
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); }
+        header { background: #172033; color: white; padding: 18px 5%; display: flex; justify-content: space-between; align-items: center; }
+        header strong { font-size: 20px; }
+        header span { color: #cbd5e1; font-size: 14px; }
+        main { max-width: 980px; margin: 38px auto; padding: 0 22px; }
+        .intro { margin-bottom: 24px; }
+        h1 { margin: 0 0 8px; font-size: 30px; }
+        .intro p { margin: 0; color: var(--muted); }
+        .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; align-items: start; }
+        .panel { background: white; border: 1px solid var(--border); border-radius: 10px; padding: 26px; }
+        h2 { font-size: 18px; margin: 0 0 20px; }
+        .field { margin-bottom: 16px; }
+        label { display: block; font-size: 13px; font-weight: 700; margin-bottom: 6px; }
+        input, textarea { width: 100%; padding: 11px 12px; border: 1px solid var(--border); border-radius: 6px; font: inherit; color: var(--text); }
+        textarea { min-height: 130px; resize: vertical; }
+        input:focus, textarea:focus { outline: 2px solid #c7d2fe; border-color: var(--primary); }
+        .row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+        .checks { display: flex; gap: 18px; flex-wrap: wrap; }
+        .checks label { font-weight: 400; }
+        .checks input { width: auto; margin-right: 5px; }
+        button { border: 0; border-radius: 6px; padding: 12px 18px; font: inherit; font-weight: 700; cursor: pointer; }
+        .primary { width: 100%; background: var(--primary); color: white; }
+        .primary:hover { background: var(--primary-dark); }
+        .primary:disabled { background: #a5b4fc; cursor: wait; }
+        .message { display: none; padding: 12px; border-radius: 6px; margin-bottom: 16px; font-size: 14px; }
+        .message.show { display: block; }
+        .message.error { background: #fef2f2; color: var(--danger); border: 1px solid #fecaca; }
+        .message.success { background: #ecfdf5; color: var(--success); border: 1px solid #a7f3d0; }
+        .summary { color: var(--muted); font-size: 14px; line-height: 1.6; }
+        .summary strong { color: var(--text); }
+        .plan-panel { display: none; }
+        .plan-panel.show { display: block; }
+        .plan-header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+        .plan-header h2 { margin-bottom: 6px; }
+        .plan-meta { color: var(--muted); font-size: 14px; margin: 0 0 18px; }
+        .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; }
+        table { width: 100%; border-collapse: collapse; min-width: 680px; }
+        th, td { padding: 13px 14px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; font-size: 14px; }
+        th { background: #f1f5f9; color: #475569; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+        tr:last-child td { border-bottom: 0; }
+        .role-name { font-weight: 700; color: var(--text); }
+        .skill-list { display: flex; gap: 7px; flex-wrap: wrap; }
+        .skill-choice { display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 5px; background: white; color: #475569; font-size: 12px; }
+        .skill-choice input { width: auto; }
+        .decision { display: flex; gap: 10px; white-space: nowrap; }
+        .decision label { font-weight: 400; margin: 0; }
+        .decision input { width: auto; }
+        .bar-chart { display: grid; gap: 10px; margin: 20px 0; }
+        .bar-row { display: grid; grid-template-columns: 150px 1fr 30px; gap: 10px; align-items: center; font-size: 13px; }
+        .bar-track { height: 12px; border-radius: 3px; background: #e2e8f0; overflow: hidden; }
+        .bar-fill { height: 100%; background: var(--primary); }
+        .phase-list { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 20px; }
+        .phase { background: #eef2ff; color: #3730a3; padding: 7px 10px; border-radius: 5px; font-size: 13px; }
+        .plan-note { color: #475569; font-size: 14px; margin: 16px 0; }
+        .secondary { background: #e2e8f0; color: #334155; }
+        .logout { background: transparent; color: #cbd5e1; padding: 6px 0; }
+        @media (max-width: 760px) { .layout, .row { grid-template-columns: 1fr; } header { gap: 12px; align-items: flex-start; flex-direction: column; } }
+    </style>
+</head>
+<body>
+    <header>
+        <strong>SkillForge / Project Hiring</strong>
+        <span id="recruiterName">Recruiter</span>
+    </header>
+    <main>
+        <section class="intro">
+            <h1>Plan the team for your project</h1>
+            <p>Project hiring uses the same company, role, skills, location, and compensation details as normal hiring, with a project description and deadline added.</p>
+        </section>
+        <div class="layout">
+            <section class="panel">
+                <h2>Project intake</h2>
+                <div id="message" class="message"></div>
+                <form id="projectForm">
+                    <div class="field"><label for="companyName">Company name</label><input id="companyName" required></div>
+                    <div class="row"><div class="field"><label for="companyType">Company type</label><input id="companyType" placeholder="e.g. Startup, Enterprise, Fintech" required></div><div class="field"><label for="techStack">Tech stack, comma-separated</label><input id="techStack" placeholder="e.g. React, .NET, PostgreSQL, AWS" required></div></div>
+                    <div class="field"><label for="projectDescription">Project description</label><textarea id="projectDescription" placeholder="Describe the product, users, deliverables, and constraints." required></textarea></div>
+                    <div class="row">
+                        <div class="field"><label for="role">Primary role</label><input id="role" placeholder="e.g. Backend Engineer"></div>
+                        <div class="field"><label for="deadline">Project deadline</label><input id="deadline" type="date" required></div>
+                    </div>
+                    <div class="field"><label for="requiredSkills">Required skills, comma-separated</label><input id="requiredSkills" placeholder="e.g. C#, ASP.NET Core, PostgreSQL" required></div>
+                    <div class="row">
+                        <div class="field"><label for="experience">Years of experience (optional)</label><input id="experience" placeholder="e.g. 3-5 years"></div>
+                        <div class="field"><label for="salary">Salary range (optional)</label><input id="salary" placeholder="e.g. 90000-120000"></div>
+                    </div>
+                    <div class="field"><label>Work modes</label><div class="checks"><label><input type="checkbox" name="workMode" value="WFH"> WFH</label><label><input type="checkbox" name="workMode" value="Hybrid"> Hybrid</label><label><input type="checkbox" name="workMode" value="WFO"> WFO</label></div></div>
+                    <div class="field"><label for="locations">Locations, comma-separated</label><input id="locations" placeholder="e.g. Bengaluru, Remote"></div>
+                    <button class="primary" id="submitButton" type="submit">Analyze project and recommend team</button>
+                </form>
+            </section>
+            <section class="panel plan-panel" id="planPanel">
+                <div class="plan-header"><div><h2>Recommended team structure</h2><p class="plan-meta" id="planMeta"></p></div><span id="feasibility"></span></div>
+                <div class="bar-chart" id="barChart"></div>
+                <div class="phase-list" id="phaseList"></div>
+                <div class="table-wrap"><table><thead><tr><th>Role</th><th>Count</th><th>Seniority</th><th>Skills to include</th><th>Accept role</th></tr></thead><tbody id="rolesBody"></tbody></table></div>
+                <p class="plan-note" id="planNotes"></p>
+                <button class="primary" id="approveButton" type="button">Approve selected team plan</button>
+            </section>
+        </div>
+    </main>
+    <script>
+        const BACKEND_PORTS = ['5123', '7123', '5000'];
+        const recruiterRole = localStorage.getItem('role');
+        if (!localStorage.getItem('token') || recruiterRole !== 'recruiter') {
+            localStorage.clear();
+            window.location.href = './login.html';
+        }
+        document.getElementById('recruiterName').textContent = localStorage.getItem('username') || 'Recruiter';
+        document.getElementById('companyName').value = localStorage.getItem('companyName') || '';
+
+        async function request(endpoint, options, attempt = 0) {
+            try { return await fetch(`http://localhost:${BACKEND_PORTS[attempt]}/api${endpoint}`, options); }
+            catch (error) {
+                if (attempt + 1 < BACKEND_PORTS.length) return request(endpoint, options, attempt + 1);
+                throw new Error('No active backend service is available.');
+            }
+        }
+        function values(selector) { return [...document.querySelectorAll(selector)].filter(input => input.checked).map(input => input.value); }
+        let latestPlan = null;
+        let latestProjectId = null;
+        function showMessage(text, type) {
+            const message = document.getElementById('message');
+            message.textContent = text;
+            message.className = `message show ${type}`;
+        }
+        function cleanJson(text) {
+            const fenced = String(text || '').match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+            const candidate = fenced ? fenced[1] : String(text || '').trim();
+            const start = candidate.indexOf('{');
+            const end = candidate.lastIndexOf('}');
+            return start >= 0 && end > start ? candidate.slice(start, end + 1) : candidate;
+        }
+        function renderPlan(rawPlan, projectId) {
+            try { latestPlan = typeof rawPlan === 'string' ? JSON.parse(cleanJson(rawPlan)) : rawPlan; }
+            catch { showMessage('The team recommendation was not valid JSON. Please analyze again.', 'error'); return; }
+            latestProjectId = projectId;
+            const roles = (Array.isArray(latestPlan.team) ? latestPlan.team : []).map(member => ({ ...member, count: member.headcount, skills: member.required_skills || [] }));
+            document.getElementById('planPanel').classList.add('show');
+            document.getElementById('planMeta').textContent = `${latestPlan.project_summary?.complexity_level || 'Complexity not specified'} | ${latestPlan.total_headcount || roles.reduce((total, role) => total + (Number(role.count) || 0), 0)} people | ${latestPlan.project_summary?.feasibility || 'Feasibility not specified'}`;
+            document.getElementById('feasibility').textContent = latestPlan.project_summary?.feasibility || '';
+            document.getElementById('phaseList').innerHTML = (latestPlan.recommendations || []).map(recommendation => `<span class="phase">${recommendation}</span>`).join('');
+            const maxCount = Math.max(1, ...roles.map(role => Number(role.count) || 0));
+            document.getElementById('barChart').innerHTML = roles.map(role => `<div class="bar-row"><span>${role.role || 'Unnamed role'}</span><div class="bar-track"><div class="bar-fill" style="width:${((Number(role.count) || 0) / maxCount) * 100}%"></div></div><strong>${Number(role.count) || 0}</strong></div>`).join('');
+            document.getElementById('rolesBody').innerHTML = roles.map((role, roleIndex) => `<tr><td class="role-name">${role.role || 'Unnamed role'}</td><td>${Number(role.count) || 0}</td><td>${role.seniority || 'Not specified'}</td><td><div class="skill-list">${(Array.isArray(role.skills) ? role.skills : []).map((skill, skillIndex) => `<label class="skill-choice"><input type="checkbox" data-role="${roleIndex}" data-skill="${skillIndex}" checked> ${skill}</label>`).join('') || '<span>None listed</span>'}</div></td><td><div class="decision"><label><input type="radio" name="role-${roleIndex}" value="yes" checked> Yes</label><label><input type="radio" name="role-${roleIndex}" value="no"> No</label></div></td></tr>`).join('');
+            document.getElementById('planNotes').textContent = [latestPlan.project_summary?.feasibility_reason, ...(latestPlan.warnings || []).map(warning => `Warning: ${warning}`)].filter(Boolean).join(' ');
+        }
+        document.getElementById('projectForm').addEventListener('submit', async event => {
+            event.preventDefault();
+            const button = document.getElementById('submitButton');
+            button.disabled = true;
+            document.getElementById('planPanel').classList.remove('show');
+            try {
+                const response = await request('/recruiter/projects', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
+                    body: JSON.stringify({
+                        companyName: document.getElementById('companyName').value.trim(),
+                        companyType: document.getElementById('companyType').value.trim(),
+                        techStack: document.getElementById('techStack').value.trim(),
+                        projectDescription: document.getElementById('projectDescription').value.trim(),
+                        role: document.getElementById('role').value.trim(),
+                        requiredSkills: document.getElementById('requiredSkills').value.split(',').map(value => value.trim()).filter(Boolean),
+                        yearsOfExperience: document.getElementById('experience').value.trim(),
+                        salaryRange: document.getElementById('salary').value.trim() || null,
+                        workModes: values('[name="workMode"]'),
+                        locations: document.getElementById('locations').value.split(',').map(value => value.trim()).filter(Boolean),
+                        projectDeadline: document.getElementById('deadline').value
+                    })
+                });
+                const data = await response.json();
+                if (response.status === 401 || response.status === 403) {
+                    localStorage.clear();
+                    window.location.href = './login.html';
+                    return;
+                }
+                if (!response.ok) throw new Error(data.error || 'Project analysis could not be completed.');
+                showMessage('Project intake saved. Review the recommended team plan before matching candidates.', 'success');
+                renderPlan(data.teamBreakdown, data.id);
+            } catch (error) {
+                showMessage(error.message, 'error');
+            } finally { button.disabled = false; }
+        });
+        document.getElementById('approveButton').addEventListener('click', async () => {
+            if (!latestPlan || !latestProjectId) return;
+            const team = latestPlan.team || [];
+            latestPlan.team = team.filter((role, roleIndex) => document.querySelector(`input[name="role-${roleIndex}"]:checked`)?.value === 'yes').map((role) => {
+                const roleIndex = team.indexOf(role);
+                return { ...role, required_skills: (role.required_skills || []).filter((_, skillIndex) => document.querySelector(`input[data-role="${roleIndex}"][data-skill="${skillIndex}"]`)?.checked) };
+            });
+            latestPlan.total_headcount = latestPlan.team.reduce((total, role) => total + (Number(role.headcount) || 0), 0);
+            const button = document.getElementById('approveButton');
+            button.disabled = true;
+            try {
+                const response = await request(`/recruiter/projects/${latestProjectId}/approve-team`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` }, body: JSON.stringify({ adjustedTeamBreakdown: JSON.stringify(latestPlan) }) });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || 'The team plan could not be approved.');
+                showMessage('Team plan approved. Candidate matching is now unlocked for this project.', 'success');
+            } catch (error) { showMessage(error.message, 'error'); }
+            finally { button.disabled = false; }
+        });
+    </script>
+</body>
+</html>

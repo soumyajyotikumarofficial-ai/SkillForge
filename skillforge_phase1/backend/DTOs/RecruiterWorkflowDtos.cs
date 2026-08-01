@@ -41,6 +41,8 @@ public class CompanyDescriptionPreviewResponseDto
 public class CreateProjectHiringRequestDto
 {
     public string ProjectDescription { get; set; } = "";
+    public string TechStack { get; set; } = "";
+    public string CompanyType { get; set; } = "";
     public string Role { get; set; } = "";
     public List<string> RequiredSkills { get; set; } = new();
     public string YearsOfExperience { get; set; } = "";
@@ -60,6 +62,16 @@ public class ProjectHiringRequestResponseDto
     public bool TeamBreakdownApproved { get; set; }
     public DateTime ProjectDeadline { get; set; }
     public DateTime CreatedAt { get; set; }
+}
+
+public class ProjectTalentGapResponseDto
+{
+    public int ProjectId { get; set; }
+    public string Role { get; set; } = "";
+    public List<string> RequiredSkills { get; set; } = new();
+    public int QualifiedCandidateCount { get; set; }
+    public bool TalentGap { get; set; }
+    public string Message { get; set; } = "";
 }
 
 public class ApproveTeamBreakdownDto

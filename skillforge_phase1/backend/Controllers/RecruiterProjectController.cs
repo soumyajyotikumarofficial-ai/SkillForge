@@ -62,14 +62,35 @@ public class RecruiterProjectController : ControllerBase
         {
             return BadRequest(new { error = "ProjectDescription and CompanyName are required." });
         }
+        if (string.IsNullOrWhiteSpace(request.TechStack) || string.IsNullOrWhiteSpace(request.CompanyType))
+        {
+            return BadRequest(new { error = "TechStack and CompanyType are required for accurate team sizing." });
+        }
+        if (request.ProjectDescription.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries).Length < 8)
+        {
+            return BadRequest(new
+            {
+                error = "The project description is too vague to plan a team reliably.",
+                clarifyingQuestions = new[]
+                {
+                    "What product or deliverable must the team ship?",
+                    "Which users, integrations, or core features are in scope?",
+                    "What constraints or technology preferences should the team follow?"
+                }
+            });
+        }
+        if (request.RequiredSkills == null || request.RequiredSkills.All(string.IsNullOrWhiteSpace))
+        {
+            return BadRequest(new { error = "At least one primary required skill must be provided before team planning." });
+        }
         if (request.ProjectDeadline <= DateTime.UtcNow.Date)
         {
             return BadRequest(new { error = "ProjectDeadline must be a future date." });
         }
 
-        var jobContext = $"Project: {request.ProjectDescription}. Role: {request.Role}. Required skills: {string.Join(", ", request.RequiredSkills)}.";
+        var jobContext = $"Project: {request.ProjectDescription}. Tech stack: {request.TechStack}. Company type: {request.CompanyType}. Role: {request.Role}. Required skills: {string.Join(", ", request.RequiredSkills)}.";
         var companyDescription = await _companyDescriptionService.GenerateCompanyDescriptionAsync(request.CompanyName, jobContext);
-        var teamBreakdown = await _teamPlannerService.GenerateTeamBreakdownAsync(request.ProjectDescription, request.ProjectDeadline);
+        var teamBreakdown = await _teamPlannerService.GenerateTeamBreakdownAsync(request.ProjectDescription, request.TechStack, request.ProjectDeadline, request.CompanyName, request.CompanyType);
 
         var projectRequest = new ProjectHiringRequest
         {
@@ -101,6 +122,43 @@ public class RecruiterProjectController : ControllerBase
             TeamBreakdownApproved = projectRequest.TeamBreakdownApproved,
             ProjectDeadline = projectRequest.ProjectDeadline,
             CreatedAt = projectRequest.CreatedAt
+        });
+    }
+
+    [HttpGet("{id:int}/talent-gaps")]
+    public async Task<IActionResult> GetTalentGap(int id)
+    {
+        var recruiterId = GetRecruiterId();
+        if (recruiterId == null) return Unauthorized(new { error = "Invalid recruiter session." });
+
+        var projectRequest = await _dbContext.ProjectHiringRequests
+            .FirstOrDefaultAsync(p => p.Id == id && p.RecruiterId == recruiterId.Value);
+        if (projectRequest == null) return NotFound(new { error = "Project request not found." });
+
+        var requiredSkills = projectRequest.RequiredSkills
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var criteria = new CandidateMatchCriteria
+        {
+            RoleTitle = projectRequest.Role,
+            RequiredSkills = requiredSkills,
+            YearsOfExperience = projectRequest.YearsOfExperience,
+            Locations = projectRequest.Locations.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList(),
+            WorkModes = projectRequest.WorkModes.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList()
+        };
+
+        var qualifiedCount = (await _candidateMatchingService.MatchCandidatesAsync(criteria, topN: int.MaxValue)).Count;
+        return Ok(new ProjectTalentGapResponseDto
+        {
+            ProjectId = projectRequest.Id,
+            Role = projectRequest.Role,
+            RequiredSkills = requiredSkills,
+            QualifiedCandidateCount = qualifiedCount,
+            TalentGap = qualifiedCount == 0,
+            Message = qualifiedCount == 0
+                ? "No candidates in the database have every required primary skill. Consider adjacent skills or external sourcing."
+                : $"{qualifiedCount} candidate(s) match every required primary skill."
         });
     }
 

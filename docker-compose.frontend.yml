@@ -1,0 +1,13 @@
+version: "3.9"
+
+services:
+  frontend:
+    build:
+      context: ./skillforge_phase1/frontend/frontend-app
+      dockerfile: Dockerfile
+    container_name: skillforge-frontend
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_BASE_URL: http://localhost:5123
+    restart: unless-stopped

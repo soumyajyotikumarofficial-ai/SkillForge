@@ -1,0 +1,32 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: ./skillforge_phase1/backend
+      dockerfile: Dockerfile
+    container_name: skillforge-backend
+    ports:
+      - "5123:5123"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://0.0.0.0:5123
+      ConnectionStrings__DefaultConnection: Data Source=/data/skillforge.db
+      Jwt__Key: "your-secret-key-must-be-at-least-32-characters-long-here!!!!"
+      Jwt__Issuer: "SkillForge"
+      Jwt__Audience: "SkillForgeUsers"
+      Gemini__ApiKey: "gemini-2.5-flash-API-key"
+      Gemini__Endpoint: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+      Apify__ApiToken: "apify-API-token"
+      Apify__ActorId: "misceres~indeed-scraper"
+      Apify__BaseUrl: "https://api.apify.com/v2"
+      Apify__DailySearchQueries: "Software Engineer,.NET Developer,Java Developer,Python Developer,Full Stack Developer,Backend Developer,Frontend Developer,DevOps Engineer,Data Engineer,QA Engineer,Automation Tester,React Developer,Angular Developer"
+      Apify__DailyLocations: "Kolkata,Bengaluru,Hyderabad,Pune,Chennai,Gurugram,Noida,Mumbai,San Francisco,New York,Seattle,Austin,London,Berlin,Munich,Singapore,Toronto,Vancouver"
+      Apify__DailyCountries: "IN,US,GB,CA,DE,NL,IE,FR,CH,SG,JP,AU,KR,CN,IL,AE"
+      Apify__DailyFetchLimit: "10"
+    volumes:
+      - skillforge_data:/data
+    restart: unless-stopped
+
+volumes:
+  skillforge_data:
