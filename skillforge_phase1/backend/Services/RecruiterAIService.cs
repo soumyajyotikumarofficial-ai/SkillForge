@@ -19,7 +19,7 @@ namespace SkillForge.API.Services;
 /// All methods are defensive - AI/network failures degrade to deterministic fallbacks
 /// rather than breaking the recruiter workflow.
 /// </summary>
-public class RecruiterAIService : ICompanyDescriptionService, IProjectTeamPlannerService, ICandidateMatchingService
+public class RecruiterAIService : ICompanyDescriptionService, IProjectTeamPlannerService, IRecruiterCandidateMatchingService
 {
     private readonly IHttpClientFactory _httpFactory;
     private readonly IConfiguration _config;
@@ -104,7 +104,7 @@ Use positive whole-number headcounts, specific responsibilities and headcount re
         return BuildFallbackTeamBreakdown(projectDescription, techStack, deadline, companyName, companyType);
     }
 
-    public async Task<List<CandidateMatchResult>> MatchCandidatesAsync(CandidateMatchCriteria criteria, int topN = 5)
+    public async Task<List<RecruiterCandidateMatchResult>> MatchCandidatesAsync(CandidateMatchCriteria criteria, int topN = 5)
     {
         var resumes = await _dbContext.CandidateResumes
             .Include(r => r.Candidate)
@@ -151,16 +151,16 @@ Use positive whole-number headcounts, specific responsibilities and headcount re
 
         if (topCandidates.Count == 0)
         {
-            return new List<CandidateMatchResult>();
+            return new List<RecruiterCandidateMatchResult>();
         }
 
         var explanations = await GenerateMatchExplanationsAsync(criteria, topCandidates);
 
-        var results = new List<CandidateMatchResult>();
+        var results = new List<RecruiterCandidateMatchResult>();
         for (int i = 0; i < topCandidates.Count; i++)
         {
             var (resume, score, matched, missing) = topCandidates[i];
-            results.Add(new CandidateMatchResult
+            results.Add(new RecruiterCandidateMatchResult
             {
                 CandidateId = resume.CandidateId,
                 CandidateName = resume.Candidate?.Name ?? "Candidate",

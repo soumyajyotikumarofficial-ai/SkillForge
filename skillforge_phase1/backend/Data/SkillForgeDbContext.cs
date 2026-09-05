@@ -25,7 +25,9 @@ public class SkillForgeDbContext : DbContext
     public DbSet<CompanyJobRequest> CompanyJobRequests { get; set; }
     public DbSet<ProjectHiringRequest> ProjectHiringRequests { get; set; }
     public DbSet<CandidateShortlist> CandidateShortlists { get; set; }
+    public DbSet<CompanyCareer> CompanyCareers { get; set; }
 
+    public DbSet<EmailAuditLog> EmailAuditLogs { get; set; }
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -162,6 +164,14 @@ public class SkillForgeDbContext : DbContext
             .WithMany()
             .HasForeignKey(s => s.CandidateId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        // ===== COMPANY CAREER CONFIGURATION =====
+        modelBuilder.Entity<CompanyCareer>()
+            .HasKey(c => c.Id);
+
+        modelBuilder.Entity<CompanyCareer>()
+            .HasIndex(c => c.CompanyName)
+            .IsUnique();
 
         // ===== SEED DEFAULT DATA =====
         // ✅ FIX: Use FIXED date instead of DateTime.UtcNow

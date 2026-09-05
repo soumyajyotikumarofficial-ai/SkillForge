@@ -1,0 +1,230 @@
+-- SkillForge Email Configuration Guide
+-- ===================================
+-- 
+-- This file explains how to set up email functionality using Gmail SMTP.
+-- Follow these steps carefully to enable automated recruitment emails.
+
+-- ============================================================================
+-- STEP 1: Generate a Gmail App Password
+-- ============================================================================
+-- 
+-- 1. Go to https://myaccount.google.com/security
+-- 2. Enable 2-Step Verification (if not already enabled)
+-- 3. Go to App passwords: https://myaccount.google.com/apppasswords
+-- 4. Select "Mail" and "Windows Computer" (or your platform)
+-- 5. Generate a password (16 characters with spaces)
+-- 6. Copy this password (you'll use it in appsettings.json)
+--
+-- Example: "abcd efgh ijkl mnop"
+
+-- ============================================================================
+-- STEP 2: Update appsettings.json
+-- ============================================================================
+--
+-- Add this section to your appsettings.json:
+--
+-- {
+--   "Email": {
+--     "SenderEmail": "your-email@gmail.com",
+--     "SenderPassword": "your-app-password-here",
+--     "SmtpHost": "smtp.gmail.com",
+--     "SmtpPort": "587"
+--   },
+--   "Encryption": {
+--     "Key": "YOUR_64_HEX_CHARACTERS_HERE"
+--   }
+-- }
+--
+-- IMPORTANT: Never commit passwords to version control!
+-- Use environment variables or secrets management instead:
+--
+-- Alternative (using environment variables):
+-- {
+--   "Email": {
+--     "SenderEmail": "${SKILLFORGE_EMAIL_SENDER}",
+--     "SenderPassword": "${SKILLFORGE_EMAIL_PASSWORD}",
+--     "SmtpHost": "smtp.gmail.com",
+--     "SmtpPort": "587"
+--   }
+-- }
+
+-- ============================================================================
+-- STEP 3: Generate Encryption Key
+-- ============================================================================
+--
+-- Run this PowerShell command to generate a 256-bit encryption key:
+--
+-- $key = [System.Security.Cryptography.RNGCryptoServiceProvider]::new()
+-- $bytes = [byte[]]::new(32)
+-- $key.GetBytes($bytes)
+-- [System.BitConverter]::ToString($bytes) -replace '-', ''
+--
+-- This will output 64 hex characters. Copy this into Encryption:Key in appsettings.json
+
+-- ============================================================================
+-- STEP 4: Register Services in Program.cs
+-- ============================================================================
+--
+-- Add this to your Program.cs after setting up other services:
+--
+-- // Email service
+-- builder.Services.AddScoped<IEmailService, GmailSmtpService>();
+-- builder.Services.AddScoped<ICredentialEncryptionService, CredentialEncryptionService>();
+--
+-- // Add logging
+-- builder.Services.AddLogging(config =>
+-- {
+--     config.AddConsole();
+--     config.SetMinimumLevel(LogLevel.Information);
+-- });
+
+-- ============================================================================
+-- STEP 5: Run Database Migration
+-- ============================================================================
+--
+-- Run these commands in the backend directory:
+--
+-- dotnet ef migrations add AddEmailAuditLogsTable
+-- dotnet ef database update
+--
+-- This creates the EmailAuditLogs table for tracking email sends.
+
+-- ============================================================================
+-- STEP 6: Test Email Sending (Optional)
+-- ============================================================================
+--
+-- You can test email sending by making a POST request to:
+-- 
+-- POST /api/recruitmentemail/send-company-offer/{companyJobRequestId}/{candidateId}
+--
+-- Example with curl:
+-- curl -X POST \
+--   "http://localhost:5123/api/recruitmentemail/send-company-offer/1/1" \
+--   -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+--   -H "Content-Type: application/json"
+--
+-- Expected response (success):
+-- {
+--   "success": true,
+--   "message": "Email sent successfully to candidate@example.com",
+--   "messageId": "...",
+--   "sentAt": "2026-09-04T10:30:00Z"
+-- }
+
+-- ============================================================================
+-- TROUBLESHOOTING
+-- ============================================================================
+--
+-- Issue: "Authentication failed"
+-- Solution: Check that:
+--   1. Gmail app password is correct (16 chars with spaces)
+--   2. 2-Step Verification is enabled on your Google account
+--   3. App password is for "Mail" and your platform
+--
+-- Issue: "SMTP connection timeout"
+-- Solution: Check firewall/proxy settings. Port 587 must be open.
+--
+-- Issue: "Email logs not appearing"
+-- Solution: Ensure EmailAuditLogs migration was applied:
+--   dotnet ef database update
+--
+-- Issue: "Encryption key error"
+-- Solution: Verify the key in appsettings.json is exactly 64 hex characters.
+
+-- ============================================================================
+-- EMAIL TEMPLATE CUSTOMIZATION
+-- ============================================================================
+--
+-- To customize email templates, modify these methods in GmailSmtpService.cs:
+--
+--   - BuildCompanyJobHtmlTemplate() - For normal company job offers
+--   - BuildProjectHiringHtmlTemplate() - For project-based hiring
+--
+-- Current templates include:
+--   - Company name
+--   - Position
+--   - Location
+--   - Salary range (company jobs only)
+--   - Project deadline (projects only)
+--   - Budget/Compensation
+--   - Role details
+--   - Team information
+--
+-- To add new fields:
+--   1. Extend RecruitmentEmailTemplate class in IEmailService.cs
+--   2. Update the email template builders
+--   3. Update RecruitmentEmailController.cs to populate new fields
+
+-- ============================================================================
+-- AUDIT TRAIL
+-- ============================================================================
+--
+-- All email sends are logged to EmailAuditLogs table with:
+--   - Recipient email & name
+--   - Company & position
+--   - Success/failure status
+--   - Error messages (if failed)
+--   - SMTP message ID (if successful)
+--   - Sent timestamp
+--
+-- Query example to see all emails sent by a recruiter:
+-- SELECT * FROM EmailAuditLogs WHERE RecruiterId = 1 ORDER BY SentAt DESC;
+--
+-- Query to see failed email attempts:
+-- SELECT * FROM EmailAuditLogs WHERE SendSuccessful = 0;
+
+-- ============================================================================
+-- SECURITY NOTES
+-- ============================================================================
+--
+-- 1. NEVER commit Gmail app password to version control
+--    Use environment variables or secrets management:
+--    - Azure Key Vault
+--    - AWS Secrets Manager
+--    - HashiCorp Vault
+--    - .NET User Secrets (for local development)
+--
+-- 2. The CredentialEncryptionService uses AES-256-GCM for sensitive data
+--    Encryption key should be:
+--    - Rotated periodically
+--    - Stored securely
+--    - Different per environment
+--
+-- 3. Email audit logs should be reviewed regularly for:
+--    - Failed sends
+--    - Suspicious patterns
+--    - Compliance requirements
+--
+-- 4. Consider implementing email open/click tracking:
+--    - Requires webhook endpoint
+--    - Provides recruitment analytics
+--    - EmailAuditLog has OpenedAt and ClickedAt fields ready
+
+-- ============================================================================
+-- PRODUCTION DEPLOYMENT
+-- ============================================================================
+--
+-- Before deploying to production:
+--
+-- 1. Use a dedicated Gmail account or SendGrid for production
+--    (separate from development account)
+--
+-- 2. Update appsettings.json to use environment variables:
+--    - SKILLFORGE_EMAIL_SENDER
+--    - SKILLFORGE_EMAIL_PASSWORD
+--    - SKILLFORGE_ENCRYPTION_KEY
+--
+-- 3. Test email delivery with sample recipients
+--
+-- 4. Configure email logging and monitoring
+--
+-- 5. Set up email bounce/complaint handling (optional)
+--
+-- 6. Document email templates for compliance (GDPR, etc.)
+--
+-- 7. Create backup SMTP server configuration for failover
+--
+-- Example .env file for Docker:
+-- SKILLFORGE_EMAIL_SENDER=production-email@gmail.com
+-- SKILLFORGE_EMAIL_PASSWORD=your-app-password
+-- SKILLFORGE_ENCRYPTION_KEY=your-64-hex-char-key

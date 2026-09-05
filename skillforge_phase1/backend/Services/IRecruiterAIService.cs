@@ -31,7 +31,7 @@ public class CandidateMatchCriteria
     public List<string> WorkModes { get; set; } = new();
 }
 
-public class CandidateMatchResult
+public class RecruiterCandidateMatchResult
 {
     public int CandidateId { get; set; }
     public string CandidateName { get; set; } = "";
@@ -45,7 +45,7 @@ public class CandidateMatchResult
 /// Compares recruiter hiring criteria against candidate <c>ParsedResumeJson</c> profiles and
 /// returns a ranked shortlist with an AI-generated "why this candidate is favored" explanation.
 /// </summary>
-public interface ICandidateMatchingService
+public interface IRecruiterCandidateMatchingService
 {
-    Task<List<CandidateMatchResult>> MatchCandidatesAsync(CandidateMatchCriteria criteria, int topN = 5);
+    Task<List<RecruiterCandidateMatchResult>> MatchCandidatesAsync(CandidateMatchCriteria criteria, int topN = 5);
 }

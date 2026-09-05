@@ -24,7 +24,7 @@ public class RecruiterProjectController : ControllerBase
     private readonly SkillForgeDbContext _dbContext;
     private readonly ICompanyDescriptionService _companyDescriptionService;
     private readonly IProjectTeamPlannerService _teamPlannerService;
-    private readonly ICandidateMatchingService _candidateMatchingService;
+    private readonly IRecruiterCandidateMatchingService _candidateMatchingService;
     private readonly IEmailNotificationService _emailService;
     private readonly ILogger<RecruiterProjectController> _logger;
 
@@ -32,7 +32,7 @@ public class RecruiterProjectController : ControllerBase
         SkillForgeDbContext dbContext,
         ICompanyDescriptionService companyDescriptionService,
         IProjectTeamPlannerService teamPlannerService,
-        ICandidateMatchingService candidateMatchingService,
+        IRecruiterCandidateMatchingService candidateMatchingService,
         IEmailNotificationService emailService,
         ILogger<RecruiterProjectController> logger)
     {

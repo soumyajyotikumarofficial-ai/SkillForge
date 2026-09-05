@@ -319,7 +319,7 @@ public class JobController : ControllerBase
                     m.CreatedAt,
                     Candidate = new
                     {
-                        m.Candidate.CandidateId,
+                        m.Candidate!.CandidateId,
                         m.Candidate.Name,
                         m.Candidate.Email,
                         m.Candidate.Phone,
@@ -379,7 +379,7 @@ public class JobController : ControllerBase
                 { 
                     technology = g.Key, 
                     totalCandidates = g.Count(),
-                    averageScore = g.Select(s => s.Candidate.ResumeScore).Average()
+                    averageScore = g.Select(s => s.Candidate!.ResumeScore).Average()
                 })
                 .OrderByDescending(x => x.totalCandidates)
                 .ToListAsync();

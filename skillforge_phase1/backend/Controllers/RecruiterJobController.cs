@@ -24,14 +24,14 @@ public class RecruiterJobController : ControllerBase
 {
     private readonly SkillForgeDbContext _dbContext;
     private readonly ICompanyDescriptionService _companyDescriptionService;
-    private readonly ICandidateMatchingService _candidateMatchingService;
+    private readonly IRecruiterCandidateMatchingService _candidateMatchingService;
     private readonly IEmailNotificationService _emailService;
     private readonly ILogger<RecruiterJobController> _logger;
 
     public RecruiterJobController(
         SkillForgeDbContext dbContext,
         ICompanyDescriptionService companyDescriptionService,
-        ICandidateMatchingService candidateMatchingService,
+        IRecruiterCandidateMatchingService candidateMatchingService,
         IEmailNotificationService emailService,
         ILogger<RecruiterJobController> logger)
     {

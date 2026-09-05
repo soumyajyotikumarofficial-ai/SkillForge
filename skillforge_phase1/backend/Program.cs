@@ -6,6 +6,7 @@ using System.Net.Sockets;
 using System.Text;
 using SkillForge.Data;
 using SkillForge.API.Services;
+using SkillForge.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -48,19 +49,34 @@ builder.Services.AddSwaggerGen();
 
 builder.Services.AddDbContext<SkillForgeDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=skillforge.db")
+        .ConfigureWarnings(warnings => warnings.Ignore(
+            Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning))
 );
 
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<AIService>();
 builder.Services.AddScoped<ApifyJobService>();
+builder.Services.AddScoped<CandidateSeedDataService>();
+builder.Services.AddScoped<CompanyCareerSeedDataService>();
+builder.Services.AddScoped<ICandidateMatchingService, CandidateMatchingService>();
 builder.Services.AddSingleton<LiveJobFetcherService>();
 builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<LiveJobFetcherService>());
 
+// Email and credential encryption services
+builder.Services.AddScoped<IEmailService, GmailSmtpService>();
+builder.Services.AddScoped<ICredentialEncryptionService, CredentialEncryptionService>();
+
+// Logging configuration for email operations
+builder.Services.AddLogging(config =>
+{
+    config.AddConsole();
+    config.SetMinimumLevel(LogLevel.Information);
+});
 // ===== RECRUITER PORTAL AI & NOTIFICATION SERVICES (Feature 5) =====
 builder.Services.AddScoped<RecruiterAIService>();
 builder.Services.AddScoped<ICompanyDescriptionService>(sp => sp.GetRequiredService<RecruiterAIService>());
 builder.Services.AddScoped<IProjectTeamPlannerService>(sp => sp.GetRequiredService<RecruiterAIService>());
-builder.Services.AddScoped<ICandidateMatchingService>(sp => sp.GetRequiredService<RecruiterAIService>());
+builder.Services.AddScoped<IRecruiterCandidateMatchingService>(sp => sp.GetRequiredService<RecruiterAIService>());
 builder.Services.AddScoped<IEmailNotificationService, EmailNotificationService>();
 
 // ===== AUTHENTICATION MIDDLEWARE SCHEMAS =====
@@ -139,6 +155,16 @@ using (var scope = app.Services.CreateScope())
         // Apply pending migrations instead of EnsureCreated so schema changes reach the existing db file.
         db.Database.Migrate();
         logger.LogInformation("✅ Database initialized successfully");
+        
+        // Seed candidates with rich data
+        var seedService = services.GetRequiredService<CandidateSeedDataService>();
+        seedService.SeedCandidatesAsync().Wait();
+        logger.LogInformation("✅ Candidate seed data completed");
+        
+        // Seed company career pages
+        var companySeedService = services.GetRequiredService<CompanyCareerSeedDataService>();
+        companySeedService.SeedCompanyCareersAsync().Wait();
+        logger.LogInformation("✅ Company career pages seeded");
     }
     catch (Exception ex)
     {
