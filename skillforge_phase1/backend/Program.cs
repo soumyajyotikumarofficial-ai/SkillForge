@@ -2,7 +2,6 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.Net;
-using System.Net.Sockets;
 using System.Text;
 using SkillForge.Data;
 using SkillForge.API.Services;
@@ -11,36 +10,12 @@ using SkillForge.Services;
 var builder = WebApplication.CreateBuilder(args);
 
 // ===== ENFORCE SYSTEM NETWORK BINDING HUB =====
-var desiredPorts = new[] { 5123, 7123, 5000 };
-var availablePorts = desiredPorts.Where(IsPortAvailable).ToArray();
-
-if (!availablePorts.Any())
-{
-    throw new InvalidOperationException("No configured backend ports are available. Ensure one of 5123, 7123, or 5000 is free before starting the backend.");
-}
+var port = int.Parse(Environment.GetEnvironmentVariable("PORT") ?? "10000");
 
 builder.WebHost.ConfigureKestrel(options =>
 {
-    foreach (var port in availablePorts)
-    {
-        options.ListenLocalhost(port);
-    }
+    options.Listen(IPAddress.Any, port);
 });
-
-static bool IsPortAvailable(int port)
-{
-    try
-    {
-        using var listener = new TcpListener(IPAddress.Loopback, port);
-        listener.Start();
-        listener.Stop();
-        return true;
-    }
-    catch (SocketException)
-    {
-        return false;
-    }
-}
 
 // ===== REGISTER MVC FRAMEWORK ENGINE BINDINGS =====
 builder.Services.AddControllers();
