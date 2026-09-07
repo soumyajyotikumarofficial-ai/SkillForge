@@ -1,0 +1,200 @@
+services:
+  caddy:
+    image: caddy:2.8.4-alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      web:
+        condition: service_started
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./frontend
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: /api
+    expose:
+      - "3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ./backend
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      APP_SECRET_KEY: ${APP_SECRET_KEY:-change-me-in-development}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openai/gpt-4o-mini}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      OPENROUTER_SITE_URL: ${OPENROUTER_SITE_URL:-}
+      OPENROUTER_APP_NAME: ${OPENROUTER_APP_NAME:-Noavia Tender Opportunity Hunter}
+      DATABASE_URL: postgresql+psycopg://app:${POSTGRES_PASSWORD:-change-me-in-development}@postgres:5432/${POSTGRES_DB:-noavia}
+      STORAGE_ROOT: /data/storage
+      CLAMAV_HOST: clamav
+      CLAMAV_PORT: 3310
+      CLAMAV_FAIL_OPEN: ${CLAMAV_FAIL_OPEN:-false}
+      SCAN_INTERVAL_MINUTES: ${SCAN_INTERVAL_MINUTES:-1440}
+      SOURCE_STALE_HOURS: ${SOURCE_STALE_HOURS:-36}
+      SMTP_HOST: ${SMTP_HOST:-mailpit}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_FROM: ${SMTP_FROM:-tenders@noavia.local}
+      SOURCE_URL: ${SOURCE_URL:-https://www.service.bund.de/Content/Globals/Functions/RSSFeed/RSSGenerator_Ausschreibungen.xml}
+      SOURCE_KEYWORDS: ${SOURCE_KEYWORDS:-software,digitalisierung,cloud,daten,beratung,IT,entwicklung,systemintegration,webanwendung}
+    volumes:
+      - app_storage:/data/storage
+    expose:
+      - "8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      clamav:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ./backend
+    command: python -m app.worker
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      APP_SECRET_KEY: ${APP_SECRET_KEY:-change-me-in-development}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openai/gpt-4o-mini}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      OPENROUTER_SITE_URL: ${OPENROUTER_SITE_URL:-}
+      OPENROUTER_APP_NAME: ${OPENROUTER_APP_NAME:-Noavia Tender Opportunity Hunter}
+      DATABASE_URL: postgresql+psycopg://app:${POSTGRES_PASSWORD:-change-me-in-development}@postgres:5432/${POSTGRES_DB:-noavia}
+      STORAGE_ROOT: /data/storage
+      CLAMAV_HOST: clamav
+      CLAMAV_PORT: 3310
+      CLAMAV_FAIL_OPEN: ${CLAMAV_FAIL_OPEN:-false}
+      SCAN_INTERVAL_MINUTES: ${SCAN_INTERVAL_MINUTES:-1440}
+      SOURCE_STALE_HOURS: ${SOURCE_STALE_HOURS:-36}
+      SMTP_HOST: ${SMTP_HOST:-mailpit}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_FROM: ${SMTP_FROM:-tenders@noavia.local}
+      SOURCE_URL: ${SOURCE_URL:-https://www.service.bund.de/Content/Globals/Functions/RSSFeed/RSSGenerator_Ausschreibungen.xml}
+      SOURCE_KEYWORDS: ${SOURCE_KEYWORDS:-software,digitalisierung,cloud,daten,beratung,IT,entwicklung,systemintegration,webanwendung}
+    volumes:
+      - app_storage:/data/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      clamav:
+        condition: service_started
+    restart: unless-stopped
+
+  scheduler:
+    build:
+      context: ./backend
+    command: python -m app.scheduler
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DATABASE_URL: postgresql+psycopg://app:${POSTGRES_PASSWORD:-change-me-in-development}@postgres:5432/${POSTGRES_DB:-noavia}
+      SOURCE_URL: ${SOURCE_URL:-https://www.service.bund.de/Content/Globals/Functions/RSSFeed/RSSGenerator_Ausschreibungen.xml}
+      SCAN_INTERVAL_MINUTES: ${SCAN_INTERVAL_MINUTES:-1440}
+      SOURCE_STALE_HOURS: ${SOURCE_STALE_HOURS:-36}
+      SMTP_HOST: ${SMTP_HOST:-mailpit}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_FROM: ${SMTP_FROM:-tenders@noavia.local}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: ./backend
+    command: alembic upgrade head
+    environment:
+      DATABASE_URL: postgresql+psycopg://app:${POSTGRES_PASSWORD:-change-me-in-development}@postgres:5432/${POSTGRES_DB:-noavia}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-noavia}
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-in-development}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d ${POSTGRES_DB:-noavia}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  clamav:
+    image: clamav/clamav:1.4.3
+    expose:
+      - "3310"
+    volumes:
+      - clamav_data:/var/lib/clamav
+    restart: unless-stopped
+
+  mailpit:
+    image: axllent/mailpit:v1.20.5
+    ports:
+      - "8025:8025"
+      - "1025:1025"
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    profiles: ["observability"]
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.3.1
+    profiles: ["observability"]
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-me}
+    volumes:
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  app_storage:
+  postgres_data:
+  clamav_data:
+  caddy_data:
+  caddy_config:
+  prometheus_data:
+  grafana_data:
