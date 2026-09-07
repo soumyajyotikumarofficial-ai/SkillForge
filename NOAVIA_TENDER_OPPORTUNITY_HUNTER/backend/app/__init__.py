@@ -1,1 +1,0 @@
-"""Noavia API application."""
